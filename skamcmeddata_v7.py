@@ -117,20 +117,26 @@ SHEET_COLS = [
 
 @st.cache_resource(show_spinner=False)
 def get_sheet():
-    """Connect to Google Sheet. Returns sheet object or None if not configured."""
+    """Connect to Google Sheet. Returns (sheet_object, error_message)."""
     try:
         import gspread
         from google.oauth2.service_account import Credentials
+        # Check secrets exist
+        if "gcp_service_account" not in st.secrets:
+            return None, "Secret [gcp_service_account] not found in Streamlit secrets."
+        if "sheet" not in st.secrets:
+            return None, "Secret [sheet] not found in Streamlit secrets."
         creds = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
             scopes=["https://spreadsheets.google.com/feeds",
                     "https://www.googleapis.com/auth/drive"]
         )
         client = gspread.authorize(creds)
-        sh = client.open(st.secrets["sheet"]["name"]).sheet1
-        return sh
-    except Exception:
-        return None
+        sheet_name = st.secrets["sheet"]["name"]
+        sh = client.open(sheet_name).sheet1
+        return sh, None
+    except Exception as e:
+        return None, str(e)
 
 def sheet_init_headers(sh):
     """Add header row if sheet is empty."""
@@ -716,7 +722,7 @@ for cat in ["Purvakarma","Pradhana Karma","Pashchata Karma"]:
 # ─────────────────────────────────────────────────────────────────
 # GOOGLE SHEETS INIT (load existing data once per session)
 # ─────────────────────────────────────────────────────────────────
-sh = get_sheet()
+sh, gs_error = get_sheet()
 if sh and not st.session_state.gs_cache_loaded:
     sheet_init_headers(sh)
     existing = sheet_load_all(sh)
@@ -740,7 +746,10 @@ st.markdown("""
 if not ACD_LOADED:
     st.warning("newACD.xlsx not found — place it in the app folder and restart.")
 if not GS_AVAILABLE:
-    st.info("Google Sheets not configured — data saves to session only. See setup instructions in the script header.")
+    if gs_error:
+        st.error(f"Google Sheets error: {gs_error}")
+    else:
+        st.info("Google Sheets not configured — data saves to session only.")
 
 m1,m2,m3,m4 = st.columns(4)
 m1.metric("Date", date.today().strftime("%d %b %Y"))
@@ -1331,7 +1340,10 @@ with st.sidebar:
     if GS_AVAILABLE:
         st.success("Google Sheets connected")
     else:
-        st.warning("Google Sheets not configured")
+        if gs_error:
+            st.error(f"GS Error: {gs_error[:120]}")
+        else:
+            st.warning("Google Sheets not configured")
     st.markdown("---")
 
     # Patient search
