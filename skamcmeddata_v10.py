@@ -510,12 +510,15 @@ def init_pins():
         st.session_state.pin_store = store
 
     # Overlay with anything saved in Google Sheets Physicians tab
+    # Admin and Reception PINs are ALWAYS from code constants — never overridden by sheet
     if st.session_state.get("gs_phys_loaded") is False:
         ws_phys = st.session_state.get("ws_phys")
         if ws_phys:
             rows = gs_load(ws_phys)
             for row in rows:
                 name = str(row.get("Name","")).strip()
+                if name in (ADMIN_NAME, RECEP_NAME):
+                    continue  # never override hardcoded admin/reception
                 if name and row.get("PIN_Hash",""):
                     st.session_state.pin_store[name] = {
                         "hash": str(row["PIN_Hash"]),
