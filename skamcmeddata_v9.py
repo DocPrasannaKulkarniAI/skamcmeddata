@@ -841,25 +841,40 @@ def check_session_timeout():
 
 def try_login(name_or_role, pin_entered, physicians_list):
     """Attempt login. Returns (success, role, name, force_pin_change, error_msg)."""
+    # Guard: ensure login_attempts is always an int
+    if not isinstance(st.session_state.get("login_attempts"), int):
+        st.session_state.login_attempts = 0
+
     # Check lockout
     if st.session_state.lockout_until:
-        remaining = (st.session_state.lockout_until - datetime.now()).total_seconds()
-        if remaining > 0:
-            return False, None, None, False, f"Too many failed attempts. Try again in {int(remaining/60)+1} minute(s)."
-        else:
+        try:
+            remaining = (st.session_state.lockout_until - datetime.now()).total_seconds()
+            if remaining > 0:
+                return False, None, None, False, f"Too many failed attempts. Try again in {int(remaining/60)+1} minute(s)."
+            else:
+                st.session_state.lockout_until = None
+                st.session_state.login_attempts = 0
+        except Exception:
             st.session_state.lockout_until = None
             st.session_state.login_attempts = 0
 
     ph = hash_pin(pin_entered)
 
-    # Special: Reception Desk
+    # Reception Desk — fully handled here, never falls through
     if name_or_role == "Reception Desk":
         if ph == hash_pin(DEFAULT_RECEP_PIN):
+            st.session_state.login_attempts = 0
             return True, "Receptionist", "Reception Desk", False, None
-        # Check if PIN was changed
         rec_p = get_physician_record("Reception Desk")
-        if rec_p and ph == rec_p.get("PIN_Hash",""):
+        if rec_p and ph == str(rec_p.get("PIN_Hash", "")):
+            st.session_state.login_attempts = 0
             return True, "Receptionist", "Reception Desk", False, None
+        st.session_state.login_attempts += 1
+        if st.session_state.login_attempts >= MAX_LOGIN_ATTEMPTS:
+            st.session_state.lockout_until = datetime.now() + timedelta(minutes=LOCKOUT_MINUTES)
+            return False, None, None, False, f"Locked for {LOCKOUT_MINUTES} minutes."
+        remaining_attempts = MAX_LOGIN_ATTEMPTS - st.session_state.login_attempts
+        return False, None, None, False, f"Incorrect PIN. {remaining_attempts} attempt(s) remaining."
 
     # Find physician by name
     matched = get_physician_record(name_or_role)
@@ -869,10 +884,10 @@ def try_login(name_or_role, pin_entered, physicians_list):
             st.session_state.lockout_until = datetime.now() + timedelta(minutes=LOCKOUT_MINUTES)
         return False, None, None, False, "Physician not found."
 
-    if str(matched.get("Status","Active")) != "Active":
+    if str(matched.get("Status", "Active")) != "Active":
         return False, None, None, False, "This account is deactivated. Contact Admin."
 
-    if ph != str(matched.get("PIN_Hash","")):
+    if ph != str(matched.get("PIN_Hash", "")):
         st.session_state.login_attempts += 1
         remaining_attempts = MAX_LOGIN_ATTEMPTS - st.session_state.login_attempts
         if st.session_state.login_attempts >= MAX_LOGIN_ATTEMPTS:
@@ -882,8 +897,8 @@ def try_login(name_or_role, pin_entered, physicians_list):
 
     # Success
     st.session_state.login_attempts = 0
-    force_change = str(matched.get("PIN_Changed","No")).strip() == "No"
-    role = str(matched.get("Role","Physician")).strip()
+    force_change = str(matched.get("PIN_Changed", "No")).strip() == "No"
+    role = str(matched.get("Role", "Physician")).strip()
     return True, role, matched["Name"], force_change, None
 
 def do_pin_change(physician_name, new_pin, confirm_pin):
