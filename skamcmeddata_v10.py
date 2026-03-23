@@ -1122,7 +1122,7 @@ def render_registration():
                 "Visit_Type":vtype, "Age":age, "Gender":gender,
                 "District":district, "Occupation":occ, "Prakriti":prakriti,
                 "Lifestyle_Risk":", ".join(lrisk) if lrisk else "",
-                "Triage":triage, "Department":dlbl(dept_key), "Physician":physician,
+                "Triage":triage, "Department":dlbl(dept_key), "Physician":physician.strip(),
                 "Status":"Awaiting Physician",
                 "Consent":"Yes" if consent else "No",
                 "Chief_Complaints":", ".join(chief)+(f"; {other_cc}" if other_cc else ""),
@@ -1205,10 +1205,11 @@ def render_queue():
                 if ROLE == "Admin":
                     with st.form(key=f"ra_{r.get('Token_No','')}_{r.get('Visit_DateTime','')}"):
                         _ap = get_active_phys_names()
+                        _rkey = f"rp_{r.get('Token_No','')}_{r.get('Visit_DateTime','').replace(' ','_').replace(':','')}"
                         new_p = st.selectbox("Reassign to", _ap,
                                               index=_ap.index(r.get("Physician","")) \
                                                     if r.get("Physician","") in _ap else 0,
-                                              key=f"rp_{r.get('Token_No','')}")
+                                              key=_rkey)
                         if st.form_submit_button("Reassign"):
                             for i,r2 in enumerate(st.session_state.records):
                                 if r2.get("Visit_DateTime")==r.get("Visit_DateTime"):
@@ -1226,8 +1227,10 @@ def render_consultation():
     st.markdown(f"### Consultation — {NAME}")
 
     # Physician sees their own records; Admin sees all
+    # Strip + lowercase comparison to handle any whitespace/case issues from Sheets
     if ROLE == "Physician":
-        my_recs = [r for r in st.session_state.records if r.get("Physician","") == NAME]
+        my_recs = [r for r in st.session_state.records
+                   if str(r.get("Physician","")).strip().lower() == NAME.strip().lower()]
     else:
         my_recs = st.session_state.records
 
@@ -1240,9 +1243,10 @@ def render_consultation():
                      if str(r.get("Visit_Date","")).startswith(today)]
 
         # Today's cases assigned to this physician
+        # Include all statuses except Completed so physician can see all their cases
         pending = [r for r in my_recs
                    if str(r.get("Visit_Date","")).startswith(today)
-                   and r.get("Status","") in ("Awaiting Physician","")]
+                   and str(r.get("Status","")).strip() != "Completed"]
         pending_sorted = sorted(pending,
                                  key=lambda x: (x.get("Triage","")!="Urgent", x.get("Token_No","")))
 
@@ -1267,14 +1271,21 @@ def render_consultation():
         elif all_today:
             # Records exist today but none assigned to this physician
             st.warning(f"No patients assigned to **{NAME}** today.")
-            st.markdown("**Today's patients (to check physician assignment):**")
+            st.markdown("**Today's patients (checking physician name match):**")
             for p in all_today:
-                phys_saved = p.get("Physician","(not set)")
-                match = "✓ Match" if phys_saved == NAME else f"✗ Saved as: **{phys_saved}**"
-                st.markdown(f"- Token {p.get('Token_No','')} | "
-                            f"{p.get('Patient_Name','')} | {match}")
-            st.caption("If patients show '✗ Saved as' a different name, reception must re-register "
-                       "or Admin can reassign from the Queue tab.")
+                phys_saved = str(p.get("Physician","(not set)")).strip()
+                exact_match = phys_saved == NAME.strip()
+                case_match  = phys_saved.lower() == NAME.strip().lower()
+                if exact_match:
+                    match_txt = "✓ Exact match"
+                elif case_match:
+                    match_txt = f"⚠️ Case mismatch — saved as: `{phys_saved}`"
+                else:
+                    match_txt = f"✗ Different physician — saved as: `{phys_saved}`"
+                st.markdown(f"- Token **{p.get('Token_No','')}** | "
+                            f"{p.get('Patient_Name','')} | {match_txt}")
+            st.caption("Patients with ✗ were assigned to a different physician. "
+                       "Admin can reassign from the Queue tab.")
         else:
             st.info("No patients registered today yet.")
 
