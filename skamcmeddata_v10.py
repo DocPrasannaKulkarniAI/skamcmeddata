@@ -168,9 +168,37 @@ MASTER_PHYSICIANS = [
     ("Dr. Vishwanath",     ["SHALYA"]),
 ]
 
-# Name → departments dict for fast lookup
+# Name → departments dict for fast lookup (base — extended by admin additions)
 PHYS_DEPTS = {name: depts for name, depts in MASTER_PHYSICIANS}
 ALL_PHYS_NAMES = [name for name, _ in MASTER_PHYSICIANS]
+
+def get_active_registry():
+    """Return live physician registry merging MASTER list + admin additions - deactivated."""
+    base = {name: {"depts": depts, "active": True} for name, depts in MASTER_PHYSICIANS}
+    # Apply deactivations from session
+    for name in st.session_state.get("deactivated_physicians", []):
+        if name in base: base[name]["active"] = False
+    # Apply admin-added physicians
+    for entry in st.session_state.get("added_physicians", []):
+        base[entry["name"]] = {"depts": entry["depts"], "active": entry.get("active", True)}
+    return base
+
+def get_active_phys_names():
+    """All active physician names for login + reception dropdowns."""
+    reg = get_active_registry()
+    return sorted([n for n, v in reg.items() if v["active"]])
+
+def get_phys_for_dept(dept_key, on_req=False):
+    """Active physicians for a given department."""
+    reg = get_active_registry()
+    if on_req:
+        return sorted([n for n, v in reg.items() if v["active"]])
+    return sorted([n for n, v in reg.items() if v["active"] and dept_key in v["depts"]])
+
+def get_dept_for_phys(name):
+    """Departments for a physician name."""
+    reg = get_active_registry()
+    return reg.get(name, {}).get("depts", [])
 
 # ─────────────────────────────────────────────────────────────────
 # GOOGLE SHEETS (optional — app works without it)
@@ -756,7 +784,8 @@ _defs = {"logged_in":False,"user_role":None,"user_name":None,
          "last_activity":None,"force_pin_change":False,
          "records":[],"active_rec":{},"pid_counter":1,"med_count":1,
          "gs_ok":False,"ws_opd":None,"ws_phys":None,
-         "gs_phys_loaded":False,"gs_records_loaded":False}
+         "gs_phys_loaded":False,"gs_records_loaded":False,
+         "deactivated_physicians":[],"added_physicians":[]}
 for k,v in _defs.items():
     if k not in st.session_state: st.session_state[k]=v
 for cat in ["Purvakarma","Pradhana Karma","Pashchata Karma"]:
@@ -811,9 +840,10 @@ if not st.session_state.logged_in:
         st.markdown('<div class="login-title">OPD System — Sign In</div>', unsafe_allow_html=True)
         st.markdown('<div class="login-sub">Select your name and enter your PIN</div>', unsafe_allow_html=True)
 
-        # Name list — Reception + Admin + all physicians
+        # Name list — Reception + Admin + all ACTIVE physicians
+        active_phys = get_active_phys_names()
         login_names = ["— Select your name —", RECEP_NAME, ADMIN_NAME] + \
-                      sorted([n for n in ALL_PHYS_NAMES if n != ADMIN_NAME])
+                      [n for n in active_phys if n != ADMIN_NAME]
 
         sel = st.selectbox("Your Name", login_names, key="login_sel")
         pin = st.text_input("Your PIN", type="password", max_chars=8,
@@ -898,10 +928,16 @@ if not st.session_state.gs_ok:
 m1,m2,m3,m4 = st.columns(4)
 m1.metric("Date",  date.today().strftime("%d %b %Y"))
 m2.metric("Time",  datetime.now().strftime("%I:%M %p"))
-today_n = len([r for r in st.session_state.records
-               if str(r.get("Visit_Date","")).startswith(str(date.today()))])
-m3.metric("Today's Patients", today_n)
-m4.metric("Total Records",    len(st.session_state.records))
+today_all = [r for r in st.session_state.records
+             if str(r.get("Visit_Date","")).startswith(str(date.today()))]
+if ROLE == "Physician":
+    today_mine = [r for r in today_all if r.get("Physician","") == NAME]
+    m3.metric("My Patients Today", len(today_mine))
+    m4.metric("My Total Records",
+              len([r for r in st.session_state.records if r.get("Physician","") == NAME]))
+else:
+    m3.metric("Today's Patients", len(today_all))
+    m4.metric("Total Records",    len(st.session_state.records))
 st.markdown("---")
 
 # ─────────────────────────────────────────────────────────────────
@@ -1034,19 +1070,19 @@ def render_registration():
     with dc2:
         on_req = st.checkbox("On Request (show all physicians)", key="on_req")
 
-    # Filter physicians by department — using MASTER_PHYSICIANS
+    # Filter physicians by department — using live active registry
     if on_req:
-        phys_list = sorted(ALL_PHYS_NAMES)
+        phys_list = get_active_phys_names()
     else:
-        phys_list = sorted([n for n,d in MASTER_PHYSICIANS if dept_key in d])
-    if not phys_list: phys_list = sorted(ALL_PHYS_NAMES)
+        phys_list = get_phys_for_dept(dept_key, on_req=False)
+    if not phys_list: phys_list = get_active_phys_names()
 
     phys_def  = pf("Physician", phys_list[0])
     physician = st.selectbox("Physician",
                               phys_list,
                               index=phys_list.index(phys_def) if phys_def in phys_list else 0,
                               key="phys_sel")
-    phys_depts = PHYS_DEPTS.get(physician, [])
+    phys_depts = get_dept_for_phys(physician)
     if phys_depts:
         st.caption(f"{physician} — {' | '.join([dlbl(d) for d in phys_depts])}")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -1168,9 +1204,10 @@ def render_queue():
                 # Admin can reassign
                 if ROLE == "Admin":
                     with st.form(key=f"ra_{r.get('Token_No','')}_{r.get('Visit_DateTime','')}"):
-                        new_p = st.selectbox("Reassign to", sorted(ALL_PHYS_NAMES),
-                                              index=sorted(ALL_PHYS_NAMES).index(r.get("Physician","")) \
-                                                    if r.get("Physician","") in ALL_PHYS_NAMES else 0,
+                        _ap = get_active_phys_names()
+                        new_p = st.selectbox("Reassign to", _ap,
+                                              index=_ap.index(r.get("Physician","")) \
+                                                    if r.get("Physician","") in _ap else 0,
                                               key=f"rp_{r.get('Token_No','')}")
                         if st.form_submit_button("Reassign"):
                             for i,r2 in enumerate(st.session_state.records):
@@ -1198,10 +1235,11 @@ def render_consultation():
 
     if not rec:
         # ── Load patient ────────────────────────────────────────
-        st.info("Select a patient to consult.")
-
-        # Today's pending cases for this physician
         today = str(date.today())
+        all_today = [r for r in st.session_state.records
+                     if str(r.get("Visit_Date","")).startswith(today)]
+
+        # Today's cases assigned to this physician
         pending = [r for r in my_recs
                    if str(r.get("Visit_Date","")).startswith(today)
                    and r.get("Status","") in ("Awaiting Physician","")]
@@ -1209,7 +1247,7 @@ def render_consultation():
                                  key=lambda x: (x.get("Triage","")!="Urgent", x.get("Token_No","")))
 
         if pending_sorted:
-            st.markdown("#### Today's Pending Patients")
+            st.markdown(f"#### Today's Pending Patients ({len(pending_sorted)})")
             for p in pending_sorted:
                 col_a, col_b = st.columns([5,1])
                 with col_a:
@@ -1225,6 +1263,20 @@ def render_consultation():
                     if st.button("Open", key=f"op_{p.get('Token_No','')}_{p.get('Visit_DateTime','')}"):
                         st.session_state.active_rec = dict(p)
                         st.rerun()
+
+        elif all_today:
+            # Records exist today but none assigned to this physician
+            st.warning(f"No patients assigned to **{NAME}** today.")
+            st.markdown("**Today's patients (to check physician assignment):**")
+            for p in all_today:
+                phys_saved = p.get("Physician","(not set)")
+                match = "✓ Match" if phys_saved == NAME else f"✗ Saved as: **{phys_saved}**"
+                st.markdown(f"- Token {p.get('Token_No','')} | "
+                            f"{p.get('Patient_Name','')} | {match}")
+            st.caption("If patients show '✗ Saved as' a different name, reception must re-register "
+                       "or Admin can reassign from the Queue tab.")
+        else:
+            st.info("No patients registered today yet.")
 
         st.markdown("---")
         # Search by ID or mobile
@@ -1598,57 +1650,193 @@ def render_consultation():
 # ══════════════════════════════════════════════════════════════════
 def render_phys_mgmt():
     st.markdown("### Physician Management")
-    pm1, pm2 = st.tabs(["View & Manage", "Add New"])
+    pm1, pm2, pm3 = st.tabs(["Active Physicians", "Add New Physician", "Deactivated Physicians"])
 
+    reg = get_active_registry()
+    pin_store = st.session_state.get("pin_store", {})
+
+    # ── Tab 1: Active Physicians ─────────────────────────────────
     with pm1:
-        st.markdown("#### All Physicians")
-        pin_store = st.session_state.get("pin_store", {})
-        for name, _ in sorted(MASTER_PHYSICIANS, key=lambda x: x[0]):
-            entry = pin_store.get(name, {})
-            pin_set = entry.get("set", False)
-            c1,c2,c3 = st.columns([4,2,1])
-            with c1:
-                depts = ", ".join(PHYS_DEPTS.get(name,[]))
-                st.markdown(f"**{name}** — {depts}")
-            with c2:
-                st.caption("PIN set ✓" if pin_set else "⚠️ Using default PIN 1234")
-            with c3:
-                if st.button("Reset PIN", key=f"rp_{name}"):
-                    st.session_state.pin_store[name] = {"hash": hp(DEFAULT_PHYS_PIN), "set": False}
-                    ws_phys = st.session_state.get("ws_phys")
-                    if ws_phys:
-                        gs_upsert(ws_phys,
-                                  {"Name":name,"PIN_Hash":hp(DEFAULT_PHYS_PIN),"PIN_Set":"No",
-                                   "Added_Date":str(date.today()),"Active":"Yes","Extra_Depts":""},
-                                  ["Name"])
-                    st.success(f"PIN reset to 1234 for {name}")
+        st.markdown("#### Active Physicians")
+        st.caption("Use Deactivate (temporary leave) or Delete (permanent) to remove a physician.")
 
-        # Admin PIN management
+        active = [(n, v) for n, v in sorted(reg.items()) if v["active"]]
+        for name, info in active:
+            if name in (RECEP_NAME,): continue  # skip reception
+            entry    = pin_store.get(name, {})
+            pin_set  = entry.get("set", False)
+            depts    = ", ".join([dlbl(d) for d in info["depts"]]) if info["depts"] else "—"
+            is_admin = name == ADMIN_NAME
+
+            with st.expander(f"{name}  |  {depts}", expanded=False):
+                col1, col2, col3, col4 = st.columns([2,2,2,2])
+                with col1:
+                    st.caption("PIN status:")
+                    st.markdown("✓ PIN set" if pin_set else "⚠️ Default PIN 1234")
+                with col2:
+                    if st.button("Reset PIN to 1234", key=f"rp_{name}"):
+                        st.session_state.pin_store[name] = {"hash": hp(DEFAULT_PHYS_PIN), "set": False}
+                        ws_phys = st.session_state.get("ws_phys")
+                        if ws_phys:
+                            gs_upsert(ws_phys,
+                                      {"Name":name,"PIN_Hash":hp(DEFAULT_PHYS_PIN),"PIN_Set":"No",
+                                       "Added_Date":str(date.today()),"Active":"Yes","Extra_Depts":""},
+                                      ["Name"])
+                        st.success(f"PIN reset for {name}")
+                        st.rerun()
+                with col3:
+                    if not is_admin:
+                        if st.button("Deactivate (On Leave)", key=f"deact_{name}",
+                                     help="Hides from all dropdowns. Can reactivate later."):
+                            deact = st.session_state.get("deactivated_physicians", [])
+                            if name not in deact: deact.append(name)
+                            st.session_state.deactivated_physicians = deact
+                            # Update in added_physicians if it was admin-added
+                            for i, e in enumerate(st.session_state.get("added_physicians", [])):
+                                if e["name"] == name:
+                                    st.session_state.added_physicians[i]["active"] = False
+                            ws_phys = st.session_state.get("ws_phys")
+                            if ws_phys:
+                                gs_upsert(ws_phys,
+                                          {"Name":name,"PIN_Hash":pin_store.get(name,{}).get("hash",""),
+                                           "PIN_Set":"Yes" if pin_set else "No",
+                                           "Added_Date":str(date.today()),"Active":"No","Extra_Depts":""},
+                                          ["Name"])
+                            st.success(f"{name} deactivated. They will not appear in any dropdown.")
+                            st.rerun()
+                with col4:
+                    if not is_admin:
+                        if st.button("Delete Permanently", key=f"del_{name}",
+                                     help="Removes from all dropdowns permanently. Records are preserved."):
+                            # Add to deactivated
+                            deact = st.session_state.get("deactivated_physicians", [])
+                            if name not in deact: deact.append(name)
+                            st.session_state.deactivated_physicians = deact
+                            # Remove from added if applicable
+                            st.session_state.added_physicians = [
+                                e for e in st.session_state.get("added_physicians", [])
+                                if e["name"] != name]
+                            # Remove from pin store
+                            if name in st.session_state.pin_store:
+                                del st.session_state.pin_store[name]
+                            ws_phys = st.session_state.get("ws_phys")
+                            if ws_phys:
+                                gs_upsert(ws_phys,
+                                          {"Name":name,"PIN_Hash":"DELETED","PIN_Set":"No",
+                                           "Added_Date":str(date.today()),"Active":"DELETED","Extra_Depts":""},
+                                          ["Name"])
+                            st.success(f"{name} permanently removed. All their patient records are preserved.")
+                            st.rerun()
+
         st.markdown("---")
-        st.markdown("#### Change Your Own PIN")
-        op1,op2 = st.columns(2)
+        st.markdown("#### Change Your Admin PIN")
+        op1, op2 = st.columns(2)
         with op1: ap1 = st.text_input("New PIN", type="password", key="ap1", max_chars=8)
-        with op2: ap2 = st.text_input("Confirm", type="password", key="ap2", max_chars=8)
-        if st.button("Change Admin PIN", key="chg_admin"):
-            if ap1 != ap2: st.error("PINs do not match.")
+        with op2: ap2 = st.text_input("Confirm PIN", type="password", key="ap2", max_chars=8)
+        if st.button("Update Admin PIN", key="chg_admin"):
+            if ap1 != ap2:            st.error("PINs do not match.")
             elif len(ap1)<4 or not ap1.isdigit(): st.error("PIN must be 4-8 digits.")
             else:
                 save_new_pin(NAME, ap1)
-                st.success("PIN changed successfully.")
+                st.success("Admin PIN updated successfully.")
 
+    # ── Tab 2: Add New Physician ──────────────────────────────────
     with pm2:
-        st.markdown("#### Add New Physician to PIN System")
-        st.info("Note: To add to the department list permanently, contact the developer. "
-                "This sets a PIN for an existing or new physician name.")
-        nc1,nc2 = st.columns(2)
-        with nc1: new_name = st.text_input("Full Name", key="new_nm", placeholder="e.g. Dr. Ramesh Kumar")
-        with nc2: new_pin  = st.text_input("Initial PIN", type="password", key="new_p", max_chars=8)
-        if st.button("Add Physician", type="primary", key="add_phys"):
-            if not new_name.strip(): st.error("Enter a name.")
-            elif not new_pin or len(new_pin)<4 or not new_pin.isdigit(): st.error("PIN must be 4-8 digits.")
+        st.markdown("#### Add New Physician")
+        st.info("Fill all details. The new physician will immediately appear in all dropdowns and can log in.")
+
+        na1, na2 = st.columns(2)
+        with na1:
+            new_name = st.text_input("Full Name", key="new_nm",
+                                      placeholder="e.g. Dr. Ramesh Kumar")
+        with na2:
+            new_pin = st.text_input("Initial PIN (4-8 digits)", type="password",
+                                     key="new_p", max_chars=8,
+                                     placeholder="They will change on first login")
+
+        new_depts = st.multiselect(
+            "Departments (select all that apply)",
+            options=list(DEPARTMENTS.keys()),
+            format_func=dlbl,
+            key="new_depts",
+            help="Physician will appear in reception dropdown for these departments only")
+
+        if st.button("Add Physician", type="primary", key="add_phys_btn", use_container_width=True):
+            if not new_name.strip():
+                st.error("Please enter the physician name.")
+            elif not new_depts:
+                st.error("Please select at least one department.")
+            elif not new_pin or len(new_pin) < 4 or not new_pin.isdigit():
+                st.error("PIN must be 4-8 digits (numbers only).")
+            elif new_name.strip() in [n for n,v in reg.items()]:
+                st.error(f"'{new_name.strip()}' already exists. Use a different name or edit existing.")
             else:
-                save_new_pin(new_name.strip(), new_pin)
-                st.success(f"Added {new_name.strip()} with custom PIN.")
+                # Add to added_physicians registry
+                new_entry = {"name": new_name.strip(), "depts": new_depts, "active": True}
+                added = st.session_state.get("added_physicians", [])
+                added.append(new_entry)
+                st.session_state.added_physicians = added
+                # Set PIN (forced change on first login)
+                st.session_state.pin_store[new_name.strip()] = {
+                    "hash": hp(new_pin), "set": True}
+                # Save to Sheets
+                ws_phys = st.session_state.get("ws_phys")
+                if ws_phys:
+                    gs_upsert(ws_phys,
+                              {"Name": new_name.strip(),
+                               "PIN_Hash": hp(new_pin),
+                               "PIN_Set": "Yes",
+                               "Added_Date": str(date.today()),
+                               "Active": "Yes",
+                               "Extra_Depts": ",".join(new_depts)},
+                              ["Name"])
+                dept_labels = " | ".join([dlbl(d) for d in new_depts])
+                st.success(f"✓ **{new_name.strip()}** added successfully!")
+                st.success(f"Departments: {dept_labels}")
+                st.success(f"They can now log in with PIN: {new_pin}")
+                st.info("They will appear in reception dropdowns for their assigned departments immediately.")
+                st.rerun()
+
+    # ── Tab 3: Deactivated / Deleted Physicians ───────────────────
+    with pm3:
+        st.markdown("#### Deactivated / Former Physicians")
+        st.caption("These physicians are hidden from all dropdowns. Their patient records are preserved.")
+
+        deact_names = st.session_state.get("deactivated_physicians", [])
+        inactive = [(n, v) for n, v in reg.items() if not v["active"] or n in deact_names]
+
+        if not inactive:
+            st.info("No deactivated physicians.")
+        else:
+            for name, info in sorted(inactive, key=lambda x: x[0]):
+                col_a, col_b, col_c = st.columns([4, 2, 2])
+                with col_a:
+                    depts = ", ".join([dlbl(d) for d in info["depts"]]) if info["depts"] else "—"
+                    st.markdown(f"**{name}**  |  {depts}")
+                    # Count their records
+                    rec_count = len([r for r in st.session_state.records if r.get("Physician","")==name])
+                    st.caption(f"{rec_count} patient record(s) preserved")
+                with col_b:
+                    if st.button("Reactivate", key=f"react_{name}",
+                                 help="Bring back to active — will appear in dropdowns again"):
+                        deact = st.session_state.get("deactivated_physicians", [])
+                        if name in deact: deact.remove(name)
+                        st.session_state.deactivated_physicians = deact
+                        # Reactivate in added_physicians if present
+                        for i, e in enumerate(st.session_state.get("added_physicians", [])):
+                            if e["name"] == name:
+                                st.session_state.added_physicians[i]["active"] = True
+                        ws_phys = st.session_state.get("ws_phys")
+                        if ws_phys:
+                            pin_h = st.session_state.pin_store.get(name, {}).get("hash","")
+                            gs_upsert(ws_phys,
+                                      {"Name":name,"PIN_Hash":pin_h,"PIN_Set":"Yes",
+                                       "Added_Date":str(date.today()),"Active":"Yes","Extra_Depts":""},
+                                      ["Name"])
+                        st.success(f"{name} reactivated. They will appear in dropdowns again.")
+                        st.rerun()
+                with col_c:
+                    st.caption("Records: preserved")
 
 # ─────────────────────────────────────────────────────────────────
 # ROUTE TABS
