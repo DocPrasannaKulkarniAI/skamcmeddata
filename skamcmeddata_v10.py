@@ -203,21 +203,34 @@ def get_dept_for_phys(name):
 # ─────────────────────────────────────────────────────────────────
 # GOOGLE SHEETS (optional — app works without it)
 # ─────────────────────────────────────────────────────────────────
+# OPD_COLS matches the ACTUAL Google Sheet column order exactly.
+# Existing sheet has 66 cols (from v7); new fields appended at positions 67-74.
+# gs_upsert always aligns to sheet headers, so order here is the canonical order
+# for NEW sheets. Existing sheets are handled by reading their actual header row.
 OPD_COLS = [
-    "Patient_ID","Patient_Name","Mobile","Token_No","Visit_Date","Visit_Time",
-    "Visit_DateTime","Visit_Count","Visit_Type","Age","Gender","District",
-    "Occupation","Prakriti","Lifestyle_Risk","Triage","Department","Physician",
-    "Status","Consent","Chief_Complaints","ACD_Code_1","ACD_Meaning_1",
-    "ACD_Code_2","ACD_Meaning_2","Severity","Disease_Duration",
+    # ── Core registration (matches existing sheet) ──
+    "Patient_ID","Visit_Date","Visit_Time","Visit_DateTime","Visit_Year",
+    "Visit_Type","Consultation_Type","Age","Gender","District","Occupation",
+    "Prakriti","Lifestyle_Risk","Triage","Department","Physician",
+    "Chief_Complaints","Chief_Complaints_Modified",
+    "ACD_Code_1","ACD_Meaning_1","ACD_Code_2","ACD_Meaning_2",
+    "Severity","Disease_Duration",
+    # ── Vitals ──
     "Height_cm","Weight_kg","BMI","BMI_Category","BP","Pulse_bpm",
     "Temp_F","SpO2_pct","RR_per_min","Other_Investigation",
+    # ── Ashtavidha ──
     "Nadi","Jihva","Agni","Mala","Mutra","Sleep","Shabda","Sparsha","Drik","Akriti",
+    # ── Dashavidha ──
     "Dosha","Dushya","Bala","Kala","Satva","Satmya","Vyasana","Prakriti_Confirmed",
-    "Final_ACD_Code","Final_ACD_Meaning","Treatment_Response",
+    # ── Diagnosis & Treatment ──
+    "Final_ACD_Code","Final_ACD_Meaning",
     "TX_Purvakarma","TX_Pradhana_Karma","TX_Pashchata_Karma",
     "TX_Comments_Purvakarma","TX_Comments_Pradhana","TX_Comments_Pashchata",
-    "TX_Custom","Medicines_Summary","Lab_Tests","Followup_Date",
-    "Instructions","Physician_Notes","Followup_Notes",
+    "TX_Custom","Medicines_Summary","Lab_Tests","Instructions",
+    "Physician_Notes","Followup_Notes",
+    # ── New fields (appended — not in old sheet, added automatically) ──
+    "Patient_Name","Mobile","Token_No","Visit_Count",
+    "Status","Consent","Treatment_Response","Followup_Date",
 ]
 PHYS_COLS = ["Name","PIN_Hash","PIN_Set","Added_Date","Active","Extra_Depts"]
 
@@ -252,19 +265,29 @@ def gs_load(ws):
     except: return []
 
 def gs_upsert(ws, row_dict, keys):
+    """Insert or update a row. ALWAYS aligns to sheet header order to prevent column mismatch."""
     if not ws: return
     try:
-        cols = list(row_dict.keys())
-        row  = [clean(str(row_dict.get(c,""))) for c in cols]
         all_v = ws.get_all_values()
-        if not all_v: ws.append_row(row); return
+        if not all_v:
+            ws.append_row(OPD_COLS)
+            row = [clean(str(row_dict.get(c,""))) for c in OPD_COLS]
+            ws.append_row(row)
+            return
         hdrs = all_v[0]
-        kidx = {k: hdrs.index(k) for k in keys if k in hdrs}
-        for i,r in enumerate(all_v[1:], start=2):
-            if all(len(r)>kidx[k] and r[kidx[k]]==clean(str(row_dict.get(k,""))) for k in kidx):
-                full = [clean(str(row_dict.get(h,""))) for h in hdrs]
+        full = [clean(str(row_dict.get(h,""))) for h in hdrs]
+        kidx = {}
+        for k in keys:
+            if k in hdrs:
+                kidx[k] = hdrs.index(k)
+        for i, r in enumerate(all_v[1:], start=2):
+            match = True
+            for k, idx in kidx.items():
+                if idx >= len(r) or r[idx] != clean(str(row_dict.get(k,""))):
+                    match = False; break
+            if match:
                 ws.update(f"A{i}", [full]); return
-        ws.append_row(row)
+        ws.append_row(full)
     except Exception as e:
         st.toast(f"Sheet sync: {e}", icon="⚠️")
 
@@ -453,7 +476,7 @@ DISTRICT_LIST=["Bangalore Urban","Bangalore Rural","Mysore","Tumkur","Kolar","Ma
                 "Ballari","Chikkaballapur","Chikkamagaluru","Kodagu","Udupi",
                 "Dakshina Kannada","Uttara Kannada","Koppal","Gadag","Vijayapura",
                 "Bagalkot","Yadgir","Chamarajanagar","Ramanagara","Chitradurga",
-                "Outside Karnataka","Other"]
+                "Outside Karnataka","Other (specify below)"]
 TREATMENT_RESPONSE=["Not yet assessed","Excellent — complete relief",
                      "Good — significant improvement","Partial — moderate improvement",
                      "Minimal — slight improvement","No response","Worsened"]
@@ -577,16 +600,38 @@ def check_pin(name, pin_entered):
     return False, False
 
 def save_new_pin(name, new_pin):
+    """Save new PIN to session store AND Google Sheets immediately."""
     store = st.session_state.get("pin_store", {})
     store[name] = {"hash": hp(new_pin), "set": True}
     st.session_state.pin_store = store
-    # Persist to sheet
+    # Persist to Physicians sheet immediately
     ws_phys = st.session_state.get("ws_phys")
     if ws_phys:
-        gs_upsert(ws_phys,
-                  {"Name": name, "PIN_Hash": hp(new_pin), "PIN_Set": "Yes",
-                   "Added_Date": str(date.today()), "Active": "Yes", "Extra_Depts": ""},
-                  ["Name"])
+        phys_row = {
+            "Name": name,
+            "PIN_Hash": hp(new_pin),
+            "PIN_Set": "Yes",
+            "Added_Date": str(date.today()),
+            "Active": "Yes",
+            "Extra_Depts": ""
+        }
+        try:
+            all_v = ws_phys.get_all_values()
+            if not all_v:
+                ws_phys.append_row(PHYS_COLS)
+                ws_phys.append_row([phys_row.get(c,"") for c in PHYS_COLS])
+                return
+            hdrs = all_v[0]
+            # Find if row exists
+            name_idx = hdrs.index("Name") if "Name" in hdrs else -1
+            for i, r in enumerate(all_v[1:], start=2):
+                if name_idx >= 0 and len(r) > name_idx and r[name_idx] == name:
+                    full = [phys_row.get(h,"") for h in hdrs]
+                    ws_phys.update(f"A{i}", [full])
+                    return
+            ws_phys.append_row([phys_row.get(c,"") for c in PHYS_COLS])
+        except Exception as e:
+            st.toast(f"PIN save warning: {e}", icon="⚠️")
 
 def get_role(name):
     if name == ADMIN_NAME:    return "Admin"
@@ -1050,9 +1095,16 @@ def render_registration():
         vtype    = st.selectbox("Visit Type", ["New Case","Follow Up"],
                                  index=0 if not ret else 1, key="vtype")
         dd       = pf("District", DISTRICT_LIST[0])
-        district = st.selectbox("District", DISTRICT_LIST,
-                                 index=DISTRICT_LIST.index(dd) if dd in DISTRICT_LIST else 0,
-                                 key="district")
+        _dd_idx  = DISTRICT_LIST.index(dd) if dd in DISTRICT_LIST else 0
+        district_sel = st.selectbox("District / Area", DISTRICT_LIST,
+                                     index=_dd_idx, key="district")
+        if district_sel == "Other (specify below)":
+            district = st.text_input("Specify District / Area / City",
+                                      key="district_other",
+                                      placeholder="e.g. Tumakuru, Dubai, London...")
+            if not district: district = "Other"
+        else:
+            district = district_sel
     with c6:
         od       = pf("Occupation", OCCUPATION_OPT[0])
         occ      = st.selectbox("Occupation", OCCUPATION_OPT,
@@ -1128,33 +1180,50 @@ def render_registration():
         else:
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             rec = {
-                "Patient_ID":pid, "Patient_Name":pat_name.strip(), "Mobile":mobile,
-                "Token_No":token, "Visit_Date":str(vdate),
+                # ── Fields matching existing sheet column names ──
+                "Patient_ID":pid,
+                "Visit_Date":str(vdate),
                 "Visit_Time":datetime.now().strftime("%H:%M:%S"),
-                "Visit_DateTime":ts, "Visit_Count":vc,
-                "Visit_Type":vtype, "Age":age, "Gender":gender,
-                "District":district, "Occupation":occ, "Prakriti":prakriti,
+                "Visit_DateTime":ts,
+                "Visit_Year":vdate.year,
+                "Visit_Type":vtype,
+                "Consultation_Type":"On Request" if on_req else "Regular",
+                "Age":age, "Gender":gender, "District":district, "Occupation":occ,
+                "Prakriti":prakriti,
                 "Lifestyle_Risk":", ".join(lrisk) if lrisk else "",
-                "Triage":triage, "Department":dlbl(dept_key), "Physician":physician.strip(),
-                "Status":"Awaiting Physician",
-                "Consent":"Yes" if consent else "No",
+                "Triage":triage,
+                "Department":dlbl(dept_key),
+                "Physician":physician.strip(),
                 "Chief_Complaints":", ".join(chief)+(f"; {other_cc}" if other_cc else ""),
+                "Chief_Complaints_Modified":"",
                 "ACD_Code_1":pc1, "ACD_Meaning_1":pm1,
                 "ACD_Code_2":pc2, "ACD_Meaning_2":pm2,
                 "Severity":severity, "Disease_Duration":duration,
-                # Physician fields (empty until consultation)
-                **{f: "" for f in ["Height_cm","Weight_kg","BMI","BMI_Category",
-                                    "BP","Pulse_bpm","Temp_F","SpO2_pct","RR_per_min",
-                                    "Other_Investigation","Nadi","Jihva","Agni","Mala",
-                                    "Mutra","Sleep","Shabda","Sparsha","Drik","Akriti",
-                                    "Dosha","Dushya","Bala","Kala","Satva","Satmya",
-                                    "Vyasana","Prakriti_Confirmed","Final_ACD_Code",
-                                    "Final_ACD_Meaning","Treatment_Response",
-                                    "TX_Purvakarma","TX_Pradhana_Karma","TX_Pashchata_Karma",
-                                    "TX_Comments_Purvakarma","TX_Comments_Pradhana",
-                                    "TX_Comments_Pashchata","TX_Custom","Medicines_Summary",
-                                    "Lab_Tests","Followup_Date","Instructions",
-                                    "Physician_Notes","Followup_Notes"]},
+                # ── Vitals (empty until consultation) ──
+                "Height_cm":"","Weight_kg":"","BMI":"","BMI_Category":"",
+                "BP":"","Pulse_bpm":"","Temp_F":"","SpO2_pct":"","RR_per_min":"",
+                "Other_Investigation":"",
+                # ── Ashtavidha (empty) ──
+                "Nadi":"","Jihva":"","Agni":"","Mala":"","Mutra":"","Sleep":"",
+                "Shabda":"","Sparsha":"","Drik":"","Akriti":"",
+                # ── Dashavidha (empty) ──
+                "Dosha":"","Dushya":"","Bala":"","Kala":"","Satva":"","Satmya":"",
+                "Vyasana":"","Prakriti_Confirmed":"",
+                # ── Diagnosis & Treatment (empty) ──
+                "Final_ACD_Code":"","Final_ACD_Meaning":"",
+                "TX_Purvakarma":"","TX_Pradhana_Karma":"","TX_Pashchata_Karma":"",
+                "TX_Comments_Purvakarma":"","TX_Comments_Pradhana":"","TX_Comments_Pashchata":"",
+                "TX_Custom":"","Medicines_Summary":"","Lab_Tests":"",
+                "Instructions":"","Physician_Notes":"","Followup_Notes":"",
+                # ── New fields (not in old sheet — appended) ──
+                "Patient_Name":pat_name.strip(),
+                "Mobile":mobile,
+                "Token_No":token,
+                "Visit_Count":vc,
+                "Status":"Awaiting Physician",
+                "Consent":"Yes" if consent else "No",
+                "Treatment_Response":"",
+                "Followup_Date":"",
             }
             st.session_state.records.append(rec)
             ws = st.session_state.get("ws_opd")
@@ -1610,6 +1679,8 @@ def render_consultation():
             sp = st.session_state.get("c_same_prov",False)
             upd = {
                 "Status":"Completed","Treatment_Response":treatment_response,
+                "Chief_Complaints_Modified":st.session_state.get("mod_cc_val",
+                                             rec.get("Chief_Complaints","")),
                 "Height_cm":r["Height_cm"],"Weight_kg":r["Weight_kg"],
                 "BMI":r["BMI"],"BMI_Category":r["BMI_Category"],
                 "BP":r["BP"],"Pulse_bpm":r["Pulse_bpm"],"Temp_F":r["Temp_F"],
@@ -1948,9 +2019,19 @@ with st.sidebar:
     st.write(f"Filtered: **{len(filtered)} records**")
 
     if filtered:
+        # Export all meaningful columns (skip internal session-only fields)
         skip = {"tx_Purvakarma","tx_Pradhana Karma","tx_Pashchata Karma",
                 "tc_Purvakarma","tc_Pradhana Karma","tc_Pashchata Karma","Medicines"}
-        ecols = [c for c in OPD_COLS if c not in skip]
+        # Use sheet's actual columns if available, else OPD_COLS
+        ws_opd_export = st.session_state.get("ws_opd")
+        if ws_opd_export:
+            try:
+                hdr_row = ws_opd_export.row_values(1)
+                ecols = [c for c in hdr_row if c and c not in skip] if hdr_row else OPD_COLS
+            except:
+                ecols = [c for c in OPD_COLS if c not in skip]
+        else:
+            ecols = [c for c in OPD_COLS if c not in skip]
         df_exp = pd.DataFrame([{k: clean(str(r.get(k,""))) for k in ecols} for r in filtered])
 
         buf = io.BytesIO()
