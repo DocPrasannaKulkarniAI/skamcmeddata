@@ -1308,9 +1308,7 @@ def render_queue():
 # CONSULTATION TAB (Physician + Admin)
 # ══════════════════════════════════════════════════════════════════
 def render_consultation():
-    st.markdown(f"### Consultation — {NAME}")
-
-    # Reload records from Sheets if registration happened in this session
+    # Reload from Sheets if new registration happened
     if not st.session_state.get("gs_records_loaded", True):
         ws_opd = st.session_state.get("ws_opd")
         if ws_opd:
@@ -1318,8 +1316,7 @@ def render_consultation():
             if fresh: st.session_state.records = fresh
         st.session_state.gs_records_loaded = True
 
-    # Physician sees their own records; Admin sees all
-    # Case-insensitive + strip to handle any spacing issues
+    # Filter records by physician
     if ROLE == "Physician":
         my_recs = [r for r in st.session_state.records
                    if str(r.get("Physician","")).strip().lower() == NAME.strip().lower()]
@@ -1328,76 +1325,98 @@ def render_consultation():
 
     rec = st.session_state.get("active_rec", {})
 
+    # ════════════════════════════════════════════════════════
+    # QUEUE VIEW
+    # ════════════════════════════════════════════════════════
     if not rec:
-        # ── Load patient ────────────────────────────────────────
-        today = str(date.today())
+        st.markdown(f"### Consultation — {NAME}")
+        today     = str(date.today())
         all_today = [r for r in st.session_state.records
                      if str(r.get("Visit_Date","")).startswith(today)]
+        pending   = sorted(
+            [r for r in my_recs
+             if str(r.get("Visit_Date","")).startswith(today)
+             and str(r.get("Status","")).strip() != "Completed"],
+            key=lambda x: (x.get("Triage","")!="Urgent", x.get("Token_No","")))
 
-        # Today's cases assigned to this physician
-        # Include all statuses except Completed so physician can see all their cases
-        pending = [r for r in my_recs
-                   if str(r.get("Visit_Date","")).startswith(today)
-                   and str(r.get("Status","")).strip() != "Completed"]
-        pending_sorted = sorted(pending,
-                                 key=lambda x: (x.get("Triage","")!="Urgent", x.get("Token_No","")))
-
-        if pending_sorted:
-            st.markdown(f"#### Today's Pending Patients ({len(pending_sorted)})")
-            for p in pending_sorted:
-                col_a, col_b = st.columns([5,1])
-                with col_a:
+        if pending:
+            st.markdown(f"#### Today's Pending Patients ({len(pending)})")
+            for p in pending:
+                ca, cb = st.columns([5,1])
+                with ca:
                     urg = "🔴 URGENT — " if p.get("Triage")=="Urgent" else ""
-                    st.markdown(
-                        f'<div class="{"q-urgent" if p.get("Triage")==str("Urgent") else "q-wait"}">'
-                        f'{urg}<b>{p.get("Token_No","")}</b> &nbsp;—&nbsp; '
-                        f'<b>{p.get("Patient_Name","")}</b> &nbsp;|&nbsp; '
-                        f'{p.get("Age","")} yrs / {p.get("Gender","")} &nbsp;|&nbsp; '
-                        f'{p.get("Chief_Complaints","")[:60]}'
-                        f'</div>', unsafe_allow_html=True)
-                with col_b:
-                    if st.button("Open", key=f"op_{p.get('Token_No','')}_{p.get('Visit_DateTime','')}"):
-                        st.session_state.active_rec = dict(p)
-                        st.rerun()
-
+                    css = "q-urgent" if p.get("Triage")=="Urgent" else "q-wait"
+                    info = (f'{urg}<b>{p.get("Token_No","")}</b> — '
+                            f'<b>{p.get("Patient_Name","")}</b> | '
+                            f'{p.get("Age","")} yrs / {p.get("Gender","")} | '
+                            f'{str(p.get("Chief_Complaints",""))[:70]}')
+                    st.markdown(f'<div class="{css}">{info}</div>', unsafe_allow_html=True)
+                with cb:
+                    bk = f"op_{p.get('Token_No','')}_{str(p.get('Visit_DateTime','')).replace(' ','_')}"
+                    if st.button("Open", key=bk):
+                        st.session_state.active_rec = dict(p); st.rerun()
         elif all_today:
-            # Records exist today but none assigned to this physician
             st.warning(f"No patients assigned to **{NAME}** today.")
-            st.markdown("**Today's patients (checking physician name match):**")
+            st.markdown("**Today's patients — physician assignment check:**")
             for p in all_today:
-                phys_saved = str(p.get("Physician","(not set)")).strip()
-                exact_match = phys_saved == NAME.strip()
-                case_match  = phys_saved.lower() == NAME.strip().lower()
-                if exact_match:
-                    match_txt = "✓ Exact match"
-                elif case_match:
-                    match_txt = f"⚠️ Case mismatch — saved as: `{phys_saved}`"
-                else:
-                    match_txt = f"✗ Different physician — saved as: `{phys_saved}`"
-                st.markdown(f"- Token **{p.get('Token_No','')}** | "
-                            f"{p.get('Patient_Name','')} | {match_txt}")
-            st.caption("Patients with ✗ were assigned to a different physician. "
-                       "Admin can reassign from the Queue tab.")
+                saved = str(p.get("Physician","(not set)")).strip()
+                tag   = "✓ Match" if saved.lower()==NAME.strip().lower() else f"✗ Saved as: `{saved}`"
+                st.markdown(f"- Token **{p.get('Token_No','')}** | {p.get('Patient_Name','')} | {tag}")
+            st.caption("✗ means assigned to a different physician. Admin can reassign from Queue tab.")
         else:
             st.info("No patients registered today yet.")
 
         st.markdown("---")
-        # Search by ID or mobile
         lc1, lc2 = st.columns(2)
-        with lc1: lid  = st.text_input("Load by Patient ID",     key="c_lid_t2")
-        with lc2: lmob = st.text_input("Load by Mobile Number",   key="c_lmob_t2")
+        with lc1: lid  = st.text_input("Load by Patient ID",   key="c_lid_t2")
+        with lc2: lmob = st.text_input("Load by Mobile Number", key="c_lmob_t2")
         if lid or lmob:
-            found = find_patient(my_recs,
-                                  pid=lid if lid else None,
-                                  mobile=lmob if lmob else None)
+            found = find_patient(my_recs, pid=lid if lid else None, mobile=lmob if lmob else None)
             if found:
-                st.session_state.active_rec = dict(found[-1])
-                st.rerun()
+                st.session_state.active_rec = dict(found[-1]); st.rerun()
             else:
                 st.warning("Patient not found in your case list.")
         return
 
-    # ── Active patient ──────────────────────────────────────────
+    # ════════════════════════════════════════════════════════
+    # ACTIVE PATIENT
+    # ════════════════════════════════════════════════════════
+
+    # Queue notification
+    today   = str(date.today())
+    waiting = [r for r in my_recs
+               if str(r.get("Visit_Date","")).startswith(today)
+               and str(r.get("Status","")).strip() != "Completed"
+               and r.get("Visit_DateTime","") != rec.get("Visit_DateTime","")]
+    if waiting:
+        urgent_w = [r for r in waiting if r.get("Triage","")=="Urgent"]
+        tokens   = ", ".join([str(r.get("Token_No","")) for r in waiting[:3]])
+        if urgent_w:
+            st.error(f"🔴 {len(urgent_w)} URGENT patient(s) waiting! Tokens: {tokens}")
+        else:
+            st.info(f"⏳ {len(waiting)} patient(s) waiting in queue. Tokens: {tokens}")
+
+    # Action bar
+    ab1, ab2, ab3 = st.columns(3)
+    with ab1:
+        if st.button("← Back to Queue", key="c_back_queue", use_container_width=True):
+            st.session_state.active_rec = {}; reset_form(); st.rerun()
+    with ab2:
+        if waiting:
+            nxt = sorted(waiting, key=lambda x: (x.get("Triage","")!="Urgent", x.get("Token_No","")))[0]
+            if st.button(f"Next → {nxt.get('Token_No','')}", key="c_next_pat",
+                         use_container_width=True, type="primary"):
+                st.session_state.active_rec = dict(nxt); reset_form(); st.rerun()
+        else:
+            st.button("No more patients waiting", disabled=True, use_container_width=True)
+    with ab3:
+        if st.button("Logout", key="c_logout_btn", use_container_width=True):
+            for k in ["logged_in","user_role","user_name","force_pin_change","last_activity","active_rec"]:
+                st.session_state[k] = False if k=="logged_in" else None
+            reset_form(); st.rerun()
+
+    st.markdown("---")
+
     # Follow-up notes from previous visits
     prev_fu = sorted(
         [r for r in my_recs
@@ -1408,32 +1427,54 @@ def render_consultation():
     if prev_fu:
         last = prev_fu[-1]
         st.markdown(
-            f'<div class="fu-box"><h4>Follow-up Notes from last visit '
-            f'({last.get("Visit_Date","")} — '
-            f'{last.get("Final_ACD_Code") or last.get("ACD_Code_1","")})</h4>'
+            f'<div class="fu-box"><h4>Follow-up Note from {last.get("Visit_Date","")} '
+            f'(Dx: {last.get("Final_ACD_Code") or last.get("ACD_Code_1","")})</h4>'
             f'<p>{str(last.get("Followup_Notes","")).replace(chr(10),"<br>")}</p></div>',
             unsafe_allow_html=True)
 
-    # Patient summary banner
-    with st.expander("Patient Details", expanded=True):
-        b1,b2,b3,b4,b5 = st.columns(5)
-        b1.metric("Name",    rec.get("Patient_Name",""))
-        b2.metric("Token",   rec.get("Token_No",""))
-        b3.metric("Age/Sex", f"{rec.get('Age','')} / {rec.get('Gender','')}")
-        b4.metric("Visit #", rec.get("Visit_Count","1"))
-        b5.metric("Triage",  rec.get("Triage",""))
-        st.write(f"**ID:** {rec.get('Patient_ID','')} | **Mobile:** {rec.get('Mobile','')} | "
-                 f"**Dept:** {rec.get('Department','')} | **Prakriti:** {rec.get('Prakriti','')}")
-        if rec.get("Chief_Complaints"):
-            st.write(f"**Chief Complaints:** {rec['Chief_Complaints']}")
-        if rec.get("ACD_Code_1"):
-            st.markdown(f'**Provisional Dx:** <span class="code-tag">{rec["ACD_Code_1"]}</span> '
-                        f'{rec.get("ACD_Meaning_1","")}', unsafe_allow_html=True)
-        if st.button("Close / Load different patient", key="c_close_rec"):
-            st.session_state.active_rec = {}
-            st.rerun()
+    # Patient details + editable reception fields
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    sec("PATIENT DETAILS (from Reception — edit if needed)")
+    b1,b2,b3,b4,b5 = st.columns(5)
+    b1.metric("Name",    rec.get("Patient_Name","") or "(not set)")
+    b2.metric("Token",   rec.get("Token_No",""))
+    b3.metric("Age/Sex", f"{rec.get('Age','')} / {rec.get('Gender','')}")
+    b4.metric("Visit #", rec.get("Visit_Count","1"))
+    b5.metric("Triage",  rec.get("Triage",""))
+    st.write(f"**ID:** {rec.get('Patient_ID','')} | **Mobile:** {rec.get('Mobile','')} | "
+             f"**Dept:** {rec.get('Department','')} | **Prakriti:** {rec.get('Prakriti','')}")
 
-    # Treatment response (follow-ups)
+    # Provisional diagnosis — prominently shown
+    pcode = rec.get("ACD_Code_1",""); pmean = rec.get("ACD_Meaning_1","")
+    if pcode:
+        st.markdown(
+            f'<div style="background:#e8f5e9;border:2px solid #2d6a4f;border-radius:8px;'
+            f'padding:10px 16px;margin:8px 0">'
+            f'<span style="font-size:0.8rem;color:#555;font-weight:600">PROVISIONAL DIAGNOSIS (by Reception)</span><br>'
+            f'<span style="font-family:monospace;font-size:1.2rem;font-weight:700;color:#1a3a2a">{pcode}</span>'
+            f'&nbsp;&nbsp;<span style="color:#444;font-size:0.9rem">{pmean}</span>'
+            f'</div>', unsafe_allow_html=True)
+    if rec.get("ACD_Code_2",""):
+        st.markdown(f"Secondary provisional: `{rec.get('ACD_Code_2','')}` {rec.get('ACD_Meaning_2','')}")
+
+    # Editable complaints, severity, duration
+    cc_val = st.text_area("Chief Complaints (edit if needed)",
+                           value=rec.get("Chief_Complaints",""),
+                           key="c_cc_edit", height=55)
+    st.session_state["mod_cc_val"] = cc_val
+
+    ec1, ec2 = st.columns(2)
+    with ec1:
+        sev_def = rec.get("Severity", SEVERITY_OPT[0])
+        sev_idx = SEVERITY_OPT.index(sev_def) if sev_def in SEVERITY_OPT else 0
+        sev_edit = st.selectbox("Severity", SEVERITY_OPT, index=sev_idx, key="c_sev_edit")
+    with ec2:
+        dur_def = rec.get("Disease_Duration", DURATION_OPT[0])
+        dur_idx = DURATION_OPT.index(dur_def) if dur_def in DURATION_OPT else 0
+        dur_edit = st.selectbox("Disease Duration", DURATION_OPT, index=dur_idx, key="c_dur_edit")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Treatment response (follow-ups only)
     if str(rec.get("Visit_Count","1")) != "1":
         st.markdown('<div class="card">', unsafe_allow_html=True)
         sec("Response to Previous Treatment")
@@ -1445,246 +1486,248 @@ def render_consultation():
     else:
         treatment_response = "Not yet assessed"
 
-    # Vitals
+    # 1. Vitals
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    sec("1  Vitals")
+    sec("1  Vitals & Anthropometry")
     v1,v2,v3 = st.columns(3)
     with v1:
-        height = st.number_input("Height (cm)",  50.0, 250.0, 160.0, step=1.0, key="c_ht")
-        weight = st.number_input("Weight (kg)",  1.0,  300.0, 50.0,  step=0.5, key="c_wt")
-        bmi_v  = weight / ((height/100)**2) if height > 0 else 0
+        height = st.number_input("Height (cm)", 50.0,250.0,160.0,step=1.0,key="c_ht")
+        weight = st.number_input("Weight (kg)", 1.0,300.0,50.0,step=0.5,key="c_wt")
+        bmi_v  = weight/((height/100)**2) if height>0 else 0
         bmi_c  = bmi_cat(bmi_v)
         st.markdown(f'<div class="bmi">BMI: {bmi_v:.1f} — {bmi_c}</div>', unsafe_allow_html=True)
     with v2:
-        bp_s = st.number_input("BP Systolic (mmHg)",  60,  250, 120, step=1, key="c_bps")
-        bp_d = st.number_input("BP Diastolic (mmHg)", 40,  160,  80, step=1, key="c_bpd")
+        bp_s = st.number_input("BP Systolic",  60,250,120,step=1,key="c_bps")
+        bp_d = st.number_input("BP Diastolic", 40,160, 80,step=1,key="c_bpd")
     with v3:
-        pulse = st.number_input("Pulse (bpm)",       30, 220, 76,   step=1,   key="c_pulse")
-        temp  = st.number_input("Temperature (F)",   90.0, 108.0, 98.6, step=0.1, key="c_temp")
+        pulse = st.number_input("Pulse (bpm)",     30,220,76,  step=1,  key="c_pulse")
+        temp  = st.number_input("Temperature (F)", 90.0,108.0,98.6,step=0.1,key="c_temp")
     vv4,vv5 = st.columns(2)
-    with vv4: spo2 = st.number_input("SpO2 (%)",          50, 100, 98, step=1, key="c_spo2")
-    with vv5: rr   = st.number_input("Resp. Rate (/min)",  5,  60, 16, step=1, key="c_rr")
+    with vv4: spo2 = st.number_input("SpO2 (%)",         50,100,98,step=1,key="c_spo2")
+    with vv5: rr   = st.number_input("Resp Rate (/min)", 5,60,16, step=1,key="c_rr")
     other_inv = st.text_area("Lab Reports / Other Investigations", key="c_other_inv", height=50,
-                              placeholder="e.g. Hb 11.2 g/dL; FBS 126 mg/dL; X-ray: Disc prolapse L4-L5")
+                              placeholder="e.g. Hb 11.2; FBS 126; X-ray: L4-L5")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Ashtavidha Pariksha
+    # 2. Ashtavidha
     st.markdown('<div class="card">', unsafe_allow_html=True)
     sec("2  Ashtavidha Pariksha")
     a1,a2,a3,a4 = st.columns(4)
-    with a1: nadi=sel_other("Nadi",   NADI_OPT,   "c_nadi");  jihva=sel_other("Jihva",  JIHVA_OPT, "c_jihva")
-    with a2: agni=sel_other("Agni",   AGNI_OPT,   "c_agni");  mala =sel_other("Mala",   MALA_OPT,  "c_mala")
-    with a3: mutra=sel_other("Mutra", MUTRA_OPT,  "c_mutra"); sleep=sel_other("Nidra",  SLEEP_OPT, "c_sleep")
-    with a4: shabda=sel_other("Shabda",SHABDA_OPT,"c_shabda");sparsha=sel_other("Sparsha",SPARSHA_OPT,"c_sparsha")
+    with a1: nadi=sel_other("Nadi",NADI_OPT,"c_nadi"); jihva=sel_other("Jihva",JIHVA_OPT,"c_jihva")
+    with a2: agni=sel_other("Agni",AGNI_OPT,"c_agni"); mala=sel_other("Mala",MALA_OPT,"c_mala")
+    with a3: mutra=sel_other("Mutra",MUTRA_OPT,"c_mutra"); sleep=sel_other("Nidra",SLEEP_OPT,"c_sleep")
+    with a4: shabda=sel_other("Shabda",SHABDA_OPT,"c_shabda"); sparsha=sel_other("Sparsha",SPARSHA_OPT,"c_sparsha")
     aa5,aa6 = st.columns(2)
     with aa5: drik  =sel_other("Drik",  DRIK_OPT,  "c_drik")
     with aa6: akriti=sel_other("Akriti",AKRITI_OPT,"c_akriti")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Dashavidha Pariksha
+    # 3. Dashavidha
     st.markdown('<div class="card">', unsafe_allow_html=True)
     sec("3  Dashavidha Atura Pariksha")
     d1,d2,d3 = st.columns(3)
     with d1:
-        dosha  = sel_other("Dosha (Dominant)", DOSHA_OPT, "c_dosha")
-        dushya = st.multiselect("Dushya (Dhatu / Mala)", DUSHYA_OPT, key="c_dushya")
-        bala   = sel_other("Bala (Strength)",  BALA_OPT,  "c_bala")
+        dosha  = sel_other("Dosha",DOSHA_OPT,"c_dosha")
+        dushya = st.multiselect("Dushya",DUSHYA_OPT,key="c_dushya")
+        bala   = sel_other("Bala",BALA_OPT,"c_bala")
     with d2:
-        kala   = st.selectbox("Kala (Season)", KALA_OPT,   key="c_kala")
-        satva  = sel_other("Satva",            SATVA_OPT,  "c_satva")
-        satmya = sel_other("Satmya",           SATMYA_OPT, "c_satmya")
+        kala   = st.selectbox("Kala",KALA_OPT,key="c_kala")
+        satva  = sel_other("Satva",SATVA_OPT,"c_satva")
+        satmya = sel_other("Satmya",SATMYA_OPT,"c_satmya")
     with d3:
-        vyasana = sel_other("Vyasana (Habits)", VYASANA_OPT, "c_vyasana")
-        cprak   = st.selectbox("Prakriti (confirm)", PRAKRITI_OPT,
-                                index=PRAKRITI_OPT.index(rec.get("Prakriti", PRAKRITI_OPT[0]))
-                                      if rec.get("Prakriti") in PRAKRITI_OPT else 0,
-                                key="c_cprak")
+        vyasana= sel_other("Vyasana",VYASANA_OPT,"c_vyasana")
+        cprak  = st.selectbox("Prakriti (confirm)",PRAKRITI_OPT,
+                               index=PRAKRITI_OPT.index(rec.get("Prakriti",PRAKRITI_OPT[0]))
+                                     if rec.get("Prakriti") in PRAKRITI_OPT else 0,
+                               key="c_cprak")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Final Diagnosis
+    # 4. Final Diagnosis
     st.markdown('<div class="card">', unsafe_allow_html=True)
     sec("4  Final Diagnosis")
-    pcode = rec.get("ACD_Code_1",""); pmean = rec.get("ACD_Meaning_1","")
     if pcode:
-        st.markdown(f"Provisional: <span class='code-tag'>{pcode}</span> — {pmean}",
+        st.markdown(f"Provisional (reception): "
+                    f"<span class='code-tag'>{pcode}</span> — {pmean}",
                     unsafe_allow_html=True)
     _, fd_code, fd_mean = acd_widget("c_fds","c_fdsel","Search Final Diagnosis")
-    if st.checkbox("Same as Provisional", key="c_same_prov") and pcode:
-        fd_code = pcode; fd_mean = pmean
-        st.markdown(f'<span class="code-tag">{fd_code}</span>  {fd_mean}',
-                    unsafe_allow_html=True)
+    sp = st.checkbox("Same as Provisional", key="c_same_prov")
+    if sp and pcode:
+        fd_code=pcode; fd_mean=pmean
+        st.markdown(f'<span class="code-tag">{fd_code}</span>  {fd_mean}', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Panchakarma
+    # 5. Shamana Aushadhi (MEDICINES FIRST)
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    sec("5  Panchakarma Treatment Plan (optional)")
-
-    # Running summary
-    sp = []
-    for cat in ["Purvakarma","Pradhana Karma","Pashchata Karma"]:
-        s = st.session_state.get(f"tx_{cat}", [])
-        if s: sp.append(f"<b>{cat}:</b> {', '.join([x.split(' — ')[0] for x in s])}")
-    if sp:
-        st.markdown('<div class="tx-box">'+"<br>".join(sp)+"</div>", unsafe_allow_html=True)
-
-    tx_tabs = st.tabs(["Purvakarma","Pradhana Karma","Pashchata Karma"])
-    for cat, ttab in zip(["Purvakarma","Pradhana Karma","Pashchata Karma"], tx_tabs):
-        with ttab:
-            opts = [f"{nm} — {desc} [{cd}]" for cd,nm,desc in PK_TX[cat]]
-            cur  = [c for c in st.session_state.get(f"tx_{cat}",[]) if c in opts]
-            chosen = st.multiselect(f"Select {cat} procedures", opts, default=cur,
-                                     key=f"c_tx_ms_{cat}")
-            st.session_state[f"tx_{cat}"] = chosen
-            if chosen:
-                st.markdown("**Add comments for each procedure:**")
-                ex = st.session_state.get(f"tc_{cat}", {}); nc = {}
-                for tx in chosen:
-                    code = xcode(tx); name = tx.split(" — ")[0] if " — " in tx else tx
-                    st.markdown(f'<div style="background:#f0fff4;border-left:3px solid #2d6a4f;'
-                                f'border-radius:0 7px 7px 0;padding:6px 12px;margin:4px 0">',
-                                unsafe_allow_html=True)
-                    cmt = st.text_input(f"{name}  [{code}]", value=ex.get(code,""),
-                                         key=f"c_tc_{cat}_{code}",
-                                         placeholder="e.g. with Dhanwantaram taila 45 min daily x 7 days")
-                    st.markdown('</div>', unsafe_allow_html=True)
-                    nc[code] = cmt
-                st.session_state[f"tc_{cat}"] = nc
-
-    tx_custom = st.text_input("Additional treatment / Yoga / Pathya", key="c_tx_custom",
-                               placeholder="e.g. Pathya Ahara, Yoga Nidra")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Shamana Aushadhi
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    sec("6  Medicines (Shamana Aushadhi)")
-    ac, rc, _ = st.columns([1,1,5])
-    with ac:
-        if st.button("+ Add Medicine", key="c_add_med"):
-            st.session_state.c_med_count = st.session_state.get("c_med_count",1) + 1; st.rerun()
-    with rc:
-        if st.session_state.med_count > 1 and st.button("- Remove Last", key="c_rem_med"):
-            st.session_state.c_med_count = max(1, st.session_state.get("c_med_count",1) - 1); st.rerun()
+    sec("5  Shamana Aushadhi (Medicines)")
+    mac,mrc,_ = st.columns([1,1,5])
+    with mac:
+        if st.button("+ Add Medicine",key="c_add_med"):
+            st.session_state["c_med_count"]=st.session_state.get("c_med_count",1)+1; st.rerun()
+    with mrc:
+        if st.session_state.get("c_med_count",1)>1 and st.button("- Remove Last",key="c_rem_med"):
+            st.session_state["c_med_count"]=max(1,st.session_state.get("c_med_count",1)-1); st.rerun()
 
     medicines = []
     for i in range(1, st.session_state.get("c_med_count",1)+1):
         st.markdown(f'<div class="med-box"><b>Medicine {i}</b>', unsafe_allow_html=True)
         r1a,r1b,r1c = st.columns([3,2,2])
-        with r1a: mname  = st.text_input(f"Drug Name {i}", key=f"c_mn_{i}",
-                                          placeholder="e.g. Triphala Churna, Ashwagandha Vati")
-        with r1b: mform  = csel(f"Dosage Form {i}", DOSAGE_FORMS, f"c_mf_{i}")
-        with r1c: mroute = csel(f"Route {i}",        ROUTE_OPTIONS, f"c_mr_{i}", idx=0)
-
+        with r1a:
+            mname = st.text_input(f"Drug Name {i}",key=f"c_mn_{i}",
+                                   placeholder="e.g. Triphala Churna")
+        with r1b:
+            _mf = st.selectbox(f"Dosage Form {i}",DOSAGE_FORMS,key=f"c_mf_{i}")
+            mform = st.text_input(f"Custom form {i}",key=f"c_mf_c_{i}") if _mf=="— Custom —" else _mf
+        with r1c:
+            _mr = st.selectbox(f"Route {i}",ROUTE_OPTIONS,key=f"c_mr_{i}")
+            mroute = st.text_input(f"Custom route {i}",key=f"c_mr_c_{i}") if _mr=="— Custom —" else _mr
         r2a,r2b,r2c,r2d,r2e = st.columns([2,2,2,1,1])
-        with r2a: mdose  = csel(f"Dose {i}", DOSE_OPTIONS, f"c_md_{i}", ph="e.g. 5g BD")
-        with r2b: mtiming = st.selectbox(f"Timing {i}", TIMING_OPTIONS, key=f"c_mt_{i}")
-        with r2c: manupana = csel(f"Anupana {i}", ANUPANA_OPTIONS, f"c_ma_{i}", idx=0)
-        with r2d: mdur_val = st.number_input(f"Duration {i}", 1, 999, 15, step=1, key=f"c_mdv_{i}")
-        with r2e: mdur_unit= st.selectbox(f"Unit {i}", DURATION_UNIT, key=f"c_mdu_{i}")
-
-        preview = {"form":mform,"dose":mdose,"timing":mtiming,"anupana":manupana,
-                   "dur_val":mdur_val,"dur_unit":mdur_unit,"notes":""}
-        if mdose and mdose != "— Custom —":
-            st.caption(f"Instruction preview: {med_instruction(preview)}")
-
-        mnotes = st.text_input(f"Notes for Medicine {i} (optional)", key=f"c_mno_{i}",
+        with r2a:
+            _md = st.selectbox(f"Dose {i}",DOSE_OPTIONS,key=f"c_md_{i}")
+            mdose = st.text_input(f"Custom dose {i}",key=f"c_md_c_{i}",
+                                   placeholder="e.g. 5g BD") if _md=="— Custom —" else _md
+        with r2b: mtiming  = st.selectbox(f"Timing {i}",TIMING_OPTIONS,key=f"c_mt_{i}")
+        with r2c:
+            _ma = st.selectbox(f"Anupana {i}",ANUPANA_OPTIONS,key=f"c_ma_{i}")
+            manupana = st.text_input(f"Custom anupana {i}",key=f"c_ma_c_{i}") if _ma=="— Custom —" else _ma
+        with r2d: mdur_val  = st.number_input(f"Duration {i}",1,999,15,step=1,key=f"c_mdv_{i}")
+        with r2e: mdur_unit = st.selectbox(f"Unit {i}",DURATION_UNIT,key=f"c_mdu_{i}")
+        prev_m = {"form":mform,"dose":mdose,"timing":mtiming,"anupana":manupana,
+                  "dur_val":mdur_val,"dur_unit":mdur_unit,"notes":""}
+        if mdose and mdose!="— Custom —":
+            st.caption(f"Instruction: {med_instruction(prev_m)}")
+        mnotes = st.text_input(f"Notes {i} (optional)",key=f"c_mno_{i}",
                                 placeholder="e.g. take warm, avoid in pregnancy")
         st.markdown('</div>', unsafe_allow_html=True)
         if mname.strip():
             medicines.append({"name":mname,"form":mform,"route":mroute,"dose":mdose,
                                "timing":mtiming,"anupana":manupana,
                                "dur_val":mdur_val,"dur_unit":mdur_unit,"notes":mnotes})
-
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Lab tests + Follow-up
+    # 6. Panchakarma (AFTER MEDICINES)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    sec("6  Panchakarma Treatment Plan (optional)")
+    sp_sum = []
+    for cat in ["Purvakarma","Pradhana Karma","Pashchata Karma"]:
+        s = st.session_state.get(f"c_tx_{cat}",[])
+        if s: sp_sum.append(f"<b>{cat}:</b> {', '.join([x.split(' — ')[0] for x in s])}")
+    if sp_sum:
+        st.markdown('<div class="tx-box">'+"<br>".join(sp_sum)+"</div>", unsafe_allow_html=True)
+    pk_tabs = st.tabs(["Purvakarma","Pradhana Karma","Pashchata Karma"])
+    for cat,ttab in zip(["Purvakarma","Pradhana Karma","Pashchata Karma"],pk_tabs):
+        with ttab:
+            opts   = [f"{nm} — {desc} [{cd}]" for cd,nm,desc in PK_TX[cat]]
+            cur    = [c for c in st.session_state.get(f"c_tx_{cat}",[]) if c in opts]
+            chosen = st.multiselect(f"Select {cat} procedures",opts,default=cur,key=f"c_tx_ms_{cat}")
+            st.session_state[f"c_tx_{cat}"] = chosen
+            if chosen:
+                ex=st.session_state.get(f"c_tc_{cat}",{}); nc={}
+                for tx in chosen:
+                    c2=xcode(tx); n2=tx.split(" — ")[0] if " — " in tx else tx
+                    st.markdown('<div style="background:#f0fff4;border-left:3px solid #2d6a4f;'
+                                'border-radius:0 7px 7px 0;padding:6px 12px;margin:4px 0">',
+                                unsafe_allow_html=True)
+                    cmt2=st.text_input(f"{n2}  [{c2}]",value=ex.get(c2,""),
+                                        key=f"c_tc_{cat}_{c2}",
+                                        placeholder="e.g. Dhanwantaram taila 45 min x 7 days")
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    nc[c2]=cmt2
+                st.session_state[f"c_tc_{cat}"]=nc
+    tx_custom=st.text_input("Additional / Yoga / Pathya",key="c_tx_custom",
+                              placeholder="e.g. Pathya Ahara, Yoga Nidra")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # 7. Lab Tests & Follow-up
     st.markdown('<div class="card">', unsafe_allow_html=True)
     sec("7  Lab Tests & Follow-up Date")
-    l1, l2 = st.columns([3,1])
+    l1,l2 = st.columns([3,1])
     with l1:
-        lab_tests = st.text_area("Tests to be done before next visit", key="c_lab_tests",
-                                  height=50, placeholder="e.g. CBC, FBS, HbA1c, Lipid profile")
+        lab_tests=st.text_area("Tests before next visit",key="c_lab_tests",height=50,
+                                placeholder="e.g. CBC, FBS, HbA1c, Lipid profile")
     with l2:
-        followup_date = st.date_input("Next Visit Date",
-                                       value=date.today()+timedelta(days=15), key="c_fu_date")
+        followup_date=st.date_input("Next Visit",value=date.today()+timedelta(days=15),key="c_fu_date")
         st.caption("Default: 15 days")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Instructions
+    # 8. Instructions
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    sec("8  Instructions for Patient (optional)")
-    instructions = st.text_area("Dietary advice, lifestyle, precautions", key="c_instruct",
-                                  height=70,
-                                  placeholder="e.g. Avoid cold and oily food\nDrink warm water throughout the day\nRest adequately")
+    sec("8  Instructions for Patient")
+    instructions=st.text_area("Dietary advice, lifestyle, precautions",key="c_instruct",height=70,
+                               placeholder="e.g. Avoid cold and oily food\nDrink warm water\nRest adequately")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Notes
+    # 9. Notes
     st.markdown('<div class="card">', unsafe_allow_html=True)
     sec("9  Physician Notes")
-    phys_notes = st.text_area("Clinical notes (for records)", key="c_phys_notes", height=50,
-                               placeholder="Referrals, special observations, clinical notes...")
-    followup_notes = st.text_area("Follow-up reminder (visible at patient's next visit)",
-                                   key="c_fu_notes", height=55,
-                                   placeholder="e.g. Check BP response\nReview HbA1c\nAssess Sneha Pana tolerance before Virechana")
+    phys_notes=st.text_area("Clinical notes (for records)",key="c_phys_notes",height=50,
+                              placeholder="Referrals, special observations...")
+    followup_notes=st.text_area("Follow-up reminder (shown at next visit)",
+                                 key="c_fu_notes",height=55,
+                                 placeholder="e.g. Check BP\nReview HbA1c\nAssess Sneha Pana tolerance")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Save + PDF
+    # 10. Save & Print
     st.markdown('<div class="card">', unsafe_allow_html=True)
     sec("10  Save & Print Prescription")
 
+    def cmt_flat(sel,cmt):
+        return "; ".join([f"{xcode(t)}: {cmt.get(xcode(t),'')}" for t in sel if cmt.get(xcode(t))])
+
     def build_full():
-        tx_pur = st.session_state.get("c_tx_Purvakarma",[])
-        tx_pra = st.session_state.get("c_tx_Pradhana Karma",[])
-        tx_pas = st.session_state.get("c_tx_Pashchata Karma",[])
-        tc_pur = st.session_state.get("c_tc_Purvakarma",{})
-        tc_pra = st.session_state.get("c_tc_Pradhana Karma",{})
-        tc_pas = st.session_state.get("c_tc_Pashchata Karma",{})
-        r = dict(rec)
-        r["tx_Purvakarma"]    = tx_pur; r["tx_Pradhana Karma"] = tx_pra; r["tx_Pashchata Karma"] = tx_pas
-        r["tc_Purvakarma"]    = tc_pur; r["tc_Pradhana Karma"] = tc_pra; r["tc_Pashchata Karma"] = tc_pas
-        r["TX_Custom"]        = st.session_state.get("c_tx_custom","")
-        r["Medicines"]        = medicines
-        r["Lab_Tests"]        = st.session_state.get("c_lab_tests","")
-        r["Instructions"]     = st.session_state.get("c_instruct","")
-        r["Followup_Date"]    = str(st.session_state.get("c_fu_date",""))
-        r["Physician_Notes"]  = st.session_state.get("c_phys_notes","")
-        r["Followup_Notes"]   = st.session_state.get("c_fu_notes","")
-        r["Height_cm"]  = st.session_state.get("c_ht",0)
-        r["Weight_kg"]  = st.session_state.get("c_wt",0)
-        r["BMI"]        = round(bmi_v,1); r["BMI_Category"] = bmi_c
-        r["BP"]         = f"{st.session_state.get('bps',120)}/{st.session_state.get('bpd',80)}"
-        r["Pulse_bpm"]  = st.session_state.get("c_pulse",76)
-        r["Temp_F"]     = st.session_state.get("c_temp",98.6)
-        r["SpO2_pct"]   = st.session_state.get("c_spo2",98)
-        sp = st.session_state.get("c_same_prov", False)
-        if sp:      r["Final_ACD_Code"]=pcode; r["Final_ACD_Meaning"]=pmean
+        tx_pur=st.session_state.get("c_tx_Purvakarma",[])
+        tx_pra=st.session_state.get("c_tx_Pradhana Karma",[])
+        tx_pas=st.session_state.get("c_tx_Pashchata Karma",[])
+        tc_pur=st.session_state.get("c_tc_Purvakarma",{})
+        tc_pra=st.session_state.get("c_tc_Pradhana Karma",{})
+        tc_pas=st.session_state.get("c_tc_Pashchata Karma",{})
+        r=dict(rec)
+        r["tx_Purvakarma"]=tx_pur; r["tx_Pradhana Karma"]=tx_pra; r["tx_Pashchata Karma"]=tx_pas
+        r["tc_Purvakarma"]=tc_pur; r["tc_Pradhana Karma"]=tc_pra; r["tc_Pashchata Karma"]=tc_pas
+        r["TX_Custom"]=st.session_state.get("c_tx_custom","")
+        r["Medicines"]=medicines
+        r["Lab_Tests"]=st.session_state.get("c_lab_tests","")
+        r["Instructions"]=st.session_state.get("c_instruct","")
+        r["Followup_Date"]=str(st.session_state.get("c_fu_date",""))
+        r["Physician_Notes"]=st.session_state.get("c_phys_notes","")
+        r["Followup_Notes"]=st.session_state.get("c_fu_notes","")
+        r["Height_cm"]=st.session_state.get("c_ht",0)
+        r["Weight_kg"]=st.session_state.get("c_wt",0)
+        r["BMI"]=round(bmi_v,1); r["BMI_Category"]=bmi_c
+        r["BP"]=f"{st.session_state.get('c_bps',120)}/{st.session_state.get('c_bpd',80)}"
+        r["Pulse_bpm"]=st.session_state.get("c_pulse",76)
+        r["Temp_F"]=st.session_state.get("c_temp",98.6)
+        r["SpO2_pct"]=st.session_state.get("c_spo2",98)
+        if sp:        r["Final_ACD_Code"]=pcode; r["Final_ACD_Meaning"]=pmean
         elif fd_code: r["Final_ACD_Code"]=fd_code; r["Final_ACD_Meaning"]=fd_mean
         return r
 
-    def cmt_flat(sel, cmt):
-        return "; ".join([f"{xcode(t)}: {cmt.get(xcode(t),'')}" for t in sel if cmt.get(xcode(t))])
-
-    s1, s2, s3, s4 = st.columns(4)
+    s1,s2,s3,s4 = st.columns(4)
     with s1:
-        if st.button("Save Consultation", type="primary", use_container_width=True, key="c_save_cons"):
-            r = build_full()
-            tx_pur = st.session_state.get("c_tx_Purvakarma",[])
-            tx_pra = st.session_state.get("c_tx_Pradhana Karma",[])
-            tx_pas = st.session_state.get("c_tx_Pashchata Karma",[])
-            tc_pur = st.session_state.get("c_tc_Purvakarma",{})
-            tc_pra = st.session_state.get("c_tc_Pradhana Karma",{})
-            tc_pas = st.session_state.get("c_tc_Pashchata Karma",{})
-            med_sum = "; ".join([f"{m['name']} {m['form']} {m['dose']} {m['timing']} "
-                                  f"x{m['dur_val']} {m['dur_unit']} | Anupana:{m['anupana']}"
-                                  for m in medicines])
-            sp = st.session_state.get("c_same_prov",False)
-            upd = {
+        if st.button("Save Consultation",type="primary",use_container_width=True,key="c_save_cons"):
+            tx_pur=st.session_state.get("c_tx_Purvakarma",[])
+            tx_pra=st.session_state.get("c_tx_Pradhana Karma",[])
+            tx_pas=st.session_state.get("c_tx_Pashchata Karma",[])
+            tc_pur=st.session_state.get("c_tc_Purvakarma",{})
+            tc_pra=st.session_state.get("c_tc_Pradhana Karma",{})
+            tc_pas=st.session_state.get("c_tc_Pashchata Karma",{})
+            med_sum="; ".join([
+                f"{m['name']} {m['form']} {m['dose']} {m['timing']} "
+                f"x{m['dur_val']} {m['dur_unit']} | Anupana:{m['anupana']}"
+                for m in medicines])
+            upd={
                 "Status":"Completed","Treatment_Response":treatment_response,
                 "Chief_Complaints_Modified":st.session_state.get("mod_cc_val",
                                              rec.get("Chief_Complaints","")),
-                "Height_cm":r["Height_cm"],"Weight_kg":r["Weight_kg"],
-                "BMI":r["BMI"],"BMI_Category":r["BMI_Category"],
-                "BP":r["BP"],"Pulse_bpm":r["Pulse_bpm"],"Temp_F":r["Temp_F"],
-                "SpO2_pct":r["SpO2_pct"],"RR_per_min":st.session_state.get("c_rr",16),
+                "Severity":   st.session_state.get("c_sev_edit",rec.get("Severity","")),
+                "Disease_Duration":st.session_state.get("c_dur_edit",rec.get("Disease_Duration","")),
+                "Height_cm":st.session_state.get("c_ht",0),
+                "Weight_kg":st.session_state.get("c_wt",0),
+                "BMI":round(bmi_v,1),"BMI_Category":bmi_c,
+                "BP":f"{st.session_state.get('c_bps',120)}/{st.session_state.get('c_bpd',80)}",
+                "Pulse_bpm":st.session_state.get("c_pulse",76),
+                "Temp_F":st.session_state.get("c_temp",98.6),
+                "SpO2_pct":st.session_state.get("c_spo2",98),
+                "RR_per_min":st.session_state.get("c_rr",16),
                 "Other_Investigation":st.session_state.get("c_other_inv",""),
                 "Nadi":nadi,"Jihva":jihva,"Agni":agni,"Mala":mala,
                 "Mutra":mutra,"Sleep":sleep,"Shabda":shabda,"Sparsha":sparsha,
@@ -1694,9 +1737,9 @@ def render_consultation():
                 "Vyasana":vyasana,"Prakriti_Confirmed":cprak,
                 "Final_ACD_Code":  pcode if sp else (fd_code or ""),
                 "Final_ACD_Meaning":pmean if sp else (fd_mean or ""),
-                "TX_Purvakarma":    "; ".join([s.split(" — ")[0] for s in tx_pur]),
-                "TX_Pradhana_Karma":"; ".join([s.split(" — ")[0] for s in tx_pra]),
-                "TX_Pashchata_Karma":"; ".join([s.split(" — ")[0] for s in tx_pas]),
+                "TX_Purvakarma":   "; ".join([s2x.split(" — ")[0] for s2x in tx_pur]),
+                "TX_Pradhana_Karma":"; ".join([s2x.split(" — ")[0] for s2x in tx_pra]),
+                "TX_Pashchata_Karma":"; ".join([s2x.split(" — ")[0] for s2x in tx_pas]),
                 "TX_Comments_Purvakarma":cmt_flat(tx_pur,tc_pur),
                 "TX_Comments_Pradhana":  cmt_flat(tx_pra,tc_pra),
                 "TX_Comments_Pashchata": cmt_flat(tx_pas,tc_pas),
@@ -1709,46 +1752,38 @@ def render_consultation():
                 "Followup_Notes":st.session_state.get("c_fu_notes",""),
             }
             rec.update(upd)
-            for i, r2 in enumerate(st.session_state.records):
+            for i,r2 in enumerate(st.session_state.records):
                 if (r2.get("Patient_ID")==rec.get("Patient_ID") and
                     r2.get("Visit_DateTime")==rec.get("Visit_DateTime")):
-                    st.session_state.records[i] = rec; break
-            ws = st.session_state.get("ws_opd")
-            if ws: gs_upsert(ws, rec, ["Patient_ID","Visit_DateTime"])
-            st.success(f"Saved — {rec.get('Patient_Name','')} | "
-                       f"Final Dx: {upd['Final_ACD_Code'] or '(not set)'}")
-            reset_form()
-            st.session_state.pid_counter += 1
-            st.rerun()
+                    st.session_state.records[i]=rec; break
+            ws=st.session_state.get("ws_opd")
+            if ws: gs_upsert(ws,rec,["Patient_ID","Visit_DateTime"])
+            st.success(f"Saved — {rec.get('Patient_Name','')} | Dx: {upd['Final_ACD_Code'] or '(not set)'}")
+            reset_form(); st.session_state.pid_counter+=1; st.rerun()
 
     with s2:
-        r_rx = build_full()
-        pdf_rx = make_pdf(r_rx, mode="rx")
-        st.download_button("Prescription", data=pdf_rx,
+        r_rx=build_full(); pdf_rx=make_pdf(r_rx,mode="rx")
+        st.download_button("Prescription",data=pdf_rx,
                             file_name=f"Rx_{rec.get('Patient_ID','PT')}_{date.today()}.pdf",
-                            mime="application/pdf", key="c_dl_rx",
-                            use_container_width=True)
+                            mime="application/pdf",key="c_dl_rx",use_container_width=True)
     with s3:
-        has_pk = any(st.session_state.get(f"tx_{c}",[])
-                     for c in ["Purvakarma","Pradhana Karma","Pashchata Karma"])
+        has_pk=any(st.session_state.get(f"c_tx_{c}",[])
+                   for c in ["Purvakarma","Pradhana Karma","Pashchata Karma"])
         if has_pk:
-            r_pk = build_full()
-            pdf_pk = make_pdf(r_pk, mode="pk")
-            st.download_button("PK Advice", data=pdf_pk,
+            r_pk=build_full(); pdf_pk_b=make_pdf(r_pk,mode="pk")
+            st.download_button("PK Advice",data=pdf_pk_b,
                                 file_name=f"PK_{rec.get('Patient_ID','PT')}_{date.today()}.pdf",
-                                mime="application/pdf", key="c_dl_pk",
-                                use_container_width=True)
+                                mime="application/pdf",key="c_dl_pk",use_container_width=True)
         else:
-            st.button("PK Advice", disabled=True, use_container_width=True,
-                      help="Select Panchakarma procedures first")
+            st.button("PK Advice",disabled=True,use_container_width=True,
+                      help="Select Panchakarma procedures above first")
     with s4:
-        r_both = build_full()
-        pdf_both = make_pdf(r_both, mode="both")
-        st.download_button("Full Document", data=pdf_both,
+        r_both=build_full(); pdf_both=make_pdf(r_both,mode="both")
+        st.download_button("Full Document",data=pdf_both,
                             file_name=f"Full_{rec.get('Patient_ID','PT')}_{date.today()}.pdf",
-                            mime="application/pdf", key="c_dl_both",
-                            use_container_width=True)
+                            mime="application/pdf",key="c_dl_both",use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════════
 # PHYSICIAN MANAGEMENT (Admin only)
