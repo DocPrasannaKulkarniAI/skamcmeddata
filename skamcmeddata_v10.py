@@ -1,5 +1,5 @@
 """
-SKAMCSHRC OPD v10.0 — Clean Rebuild
+SKAMCRC & H OPD v10.0 — Clinical Data Entry System
 Sri Kalabyraveshwara Swamy Ayurvedic Medical College, Hospital & Research Centre
 
 Conceptized by : Dr. Kiran M Goud, MD (Ay.)
@@ -33,7 +33,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 # ─────────────────────────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="SKAMCSHRC OPD", layout="wide",
+st.set_page_config(page_title="SKAMCRC & H OPD", layout="wide",
                    initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -524,34 +524,47 @@ def reset_form():
 # Uses session-based pin store: {name: {"hash": ..., "set": bool}}
 # ─────────────────────────────────────────────────────────────────
 def init_pins():
-    """Build default pin store from master list if not already done."""
+    """
+    Build pin store. Priority:
+    1. Admin + Reception = always from hardcoded constants (never from sheet)
+    2. All physicians    = from Google Sheets if available, else default 1234
+    Called once per session. gs_phys_loaded guards against double-load.
+    """
     if "pin_store" not in st.session_state:
-        store = {}
-        # Admin
-        store[ADMIN_NAME] = {"hash": hp(ADMIN_PIN), "set": True}
-        # Reception
-        store[RECEP_NAME] = {"hash": hp(RECEP_PIN), "set": True}
-        # All physicians — default 1234
-        for name, _ in MASTER_PHYSICIANS:
-            if name != ADMIN_NAME:
-                store[name] = {"hash": hp(DEFAULT_PHYS_PIN), "set": False}
-        st.session_state.pin_store = store
+        st.session_state.pin_store = {}
 
-    # Overlay with anything saved in Google Sheets Physicians tab
-    # Admin and Reception PINs are ALWAYS from code constants — never overridden by sheet
-    if st.session_state.get("gs_phys_loaded") is False:
+    store = st.session_state.pin_store
+
+    # Admin and Reception — always hardcoded, never overridden
+    store[ADMIN_NAME] = {"hash": hp(ADMIN_PIN), "set": True}
+    store[RECEP_NAME] = {"hash": hp(RECEP_PIN), "set": True}
+
+    if not st.session_state.get("gs_phys_loaded", False):
         ws_phys = st.session_state.get("ws_phys")
+        sheet_pins = {}
         if ws_phys:
             rows = gs_load(ws_phys)
             for row in rows:
                 name = str(row.get("Name","")).strip()
-                if name in (ADMIN_NAME, RECEP_NAME):
-                    continue  # never override hardcoded admin/reception
-                if name and row.get("PIN_Hash",""):
-                    st.session_state.pin_store[name] = {
-                        "hash": str(row["PIN_Hash"]),
-                        "set":  str(row.get("PIN_Set","No")) == "Yes",
-                    }
+                ph   = str(row.get("PIN_Hash","")).strip()
+                ps   = str(row.get("PIN_Set","No")).strip()
+                if name and ph and ph not in ("","DELETED") and name not in (ADMIN_NAME, RECEP_NAME):
+                    sheet_pins[name] = {"hash": ph, "set": ps == "Yes"}
+
+        # Seed physicians: prefer sheet value, else default
+        for name, _ in MASTER_PHYSICIANS:
+            if name == ADMIN_NAME: continue
+            if name in sheet_pins:
+                store[name] = sheet_pins[name]
+            elif name not in store:
+                store[name] = {"hash": hp(DEFAULT_PHYS_PIN), "set": False}
+
+        # Also add any admin-added physicians from sheet
+        for name, entry in sheet_pins.items():
+            if name not in store:
+                store[name] = entry
+
+        st.session_state.pin_store = store
         st.session_state.gs_phys_loaded = True
 
 def check_pin(name, pin_entered):
@@ -647,7 +660,7 @@ def pdf_hdr(story, S, W):
     story.append(Paragraph("Sri Kalabyraveshwara Swamy Ayurvedic Medical College, Hospital & Research Centre",
                             ParagraphStyle("hb",fontName="Helvetica-Bold",fontSize=9.5,alignment=TA_CENTER,textColor=G,spaceAfter=1)))
     story.append(Paragraph("No.10, Pipeline Road, RPC Layout, Hampinagara, Vijayanagar 2nd Stage, Bangalore - 560104",S["hm"]))
-    story.append(Paragraph("Ph: 080-XXXXXXXX  |  info@skamcshrc.edu.in  |  NABH Accredited",S["hm"]))
+    story.append(Paragraph("Tel: 080-23407806  |  Mob: +91-9449831620  |  Email: skamcbangalore@gmail.com  |  NABH Accredited",S["hm"]))
     story.append(HRFlowable(width=W,thickness=2,color=G,spaceAfter=1))
     story.append(HRFlowable(width=W,thickness=0.8,color=GOLD,spaceAfter=3))
 
@@ -827,7 +840,7 @@ if st.session_state.logged_in:
 if not st.session_state.logged_in:
     st.markdown("""
     <div style='text-align:center;margin-top:30px;'>
-      <div style='font-family:Noto Serif,serif;font-size:1.5rem;font-weight:700;color:#1a3a2a'>SKAMCSHRC</div>
+      <div style='font-family:Noto Serif,serif;font-size:1.5rem;font-weight:700;color:#1a3a2a'>SKAMCRC &amp; H</div>
       <div style='color:#888;font-size:0.82rem;margin-bottom:6px'>
         Sri Kalabyraveshwara Swamy Ayurvedic Medical College<br>Hospital &amp; Research Centre, Bangalore
       </div>
@@ -878,7 +891,7 @@ if not st.session_state.logged_in:
 # FORCE PIN CHANGE
 # ─────────────────────────────────────────────────────────────────
 if st.session_state.force_pin_change:
-    st.markdown('<div class="hdr"><h2>SKAMCSHRC OPD</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hdr"><h2>SKAMCRC &amp; H OPD</h2></div>', unsafe_allow_html=True)
     st.markdown('<div class="pin-box">', unsafe_allow_html=True)
     st.markdown(f"### Welcome, {st.session_state.user_name}")
     st.warning("You are using the default PIN **1234**. Please set your own personal PIN to continue.")
@@ -914,7 +927,7 @@ rb = {"Admin":'<span class="rb-admin">ADMIN</span>',
 
 st.markdown(f"""
 <div class="hdr">
-  <h2>SKAMCSHRC — OPD Clinical Data Entry &nbsp;{rb}</h2>
+  <h2>SKAMCRC & H — OPD Clinical Data Entry &nbsp;{rb}</h2>
   <p>Logged in as <b>{NAME}</b> &nbsp;|&nbsp;
      {st.session_state.last_activity.strftime('%d %b %Y  %I:%M %p') if st.session_state.last_activity else ''}</p>
 </div>
@@ -1147,10 +1160,12 @@ def render_registration():
             ws = st.session_state.get("ws_opd")
             if ws: gs_upsert(ws, rec, ["Patient_ID","Visit_DateTime"])
             if not ret: st.session_state.pid_counter += 1
+            # Force physician tab to show this patient
+            st.session_state.gs_records_loaded = False  # triggers reload on next access
             reset_form()
             st.success(f"Registered — **{pat_name}** | Token **{token}** | "
                        f"Assigned to **{physician}** | Visit #{vc}")
-            st.info("Patient is now visible in the physician's queue.")
+            st.info(f"Patient assigned to {physician}. They can now see this patient after logging in.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════
@@ -1226,8 +1241,16 @@ def render_queue():
 def render_consultation():
     st.markdown(f"### Consultation — {NAME}")
 
+    # Reload records from Sheets if registration happened in this session
+    if not st.session_state.get("gs_records_loaded", True):
+        ws_opd = st.session_state.get("ws_opd")
+        if ws_opd:
+            fresh = gs_load(ws_opd)
+            if fresh: st.session_state.records = fresh
+        st.session_state.gs_records_loaded = True
+
     # Physician sees their own records; Admin sees all
-    # Strip + lowercase comparison to handle any whitespace/case issues from Sheets
+    # Case-insensitive + strip to handle any spacing issues
     if ROLE == "Physician":
         my_recs = [r for r in st.session_state.records
                    if str(r.get("Physician","")).strip().lower() == NAME.strip().lower()]
@@ -1483,7 +1506,7 @@ def render_consultation():
         with r1c: mroute = csel(f"Route {i}",        ROUTE_OPTIONS, f"c_mr_{i}", idx=0)
 
         r2a,r2b,r2c,r2d,r2e = st.columns([2,2,2,1,1])
-        with r2a: mdose  = csel(f"Dose {i}",    DOSE_OPTIONS,    f"md_{i}",  ph="e.g. 5g BD")
+        with r2a: mdose  = csel(f"Dose {i}", DOSE_OPTIONS, f"c_md_{i}", ph="e.g. 5g BD")
         with r2b: mtiming = st.selectbox(f"Timing {i}", TIMING_OPTIONS, key=f"c_mt_{i}")
         with r2c: manupana = csel(f"Anupana {i}", ANUPANA_OPTIONS, f"c_ma_{i}", idx=0)
         with r2d: mdur_val = st.number_input(f"Duration {i}", 1, 999, 15, step=1, key=f"c_mdv_{i}")
@@ -1869,7 +1892,7 @@ else:  # Admin
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### SKAMCSHRC OPD v10.0")
+    st.markdown("### SKAMCRC & H OPD v10.0")
     rb_css = {"Admin":"rb-admin","Physician":"rb-phys","Receptionist":"rb-recep"}.get(ROLE,"")
     st.markdown(f'<span class="{rb_css}">{ROLE}</span> &nbsp; <b>{NAME}</b>',
                 unsafe_allow_html=True)
@@ -1935,10 +1958,10 @@ with st.sidebar:
             df_exp.to_excel(w, index=False, sheet_name="OPD_Records")
         buf.seek(0)
         st.download_button("Download Excel", data=buf,
-                            file_name=f"SKAMCSHRC_{d_from}_{d_to}.xlsx",
+                            file_name=f"SKAMCRC_H_{d_from}_{d_to}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True)
         csv_d = df_exp.to_csv(index=False).encode("utf-8-sig")
         st.download_button("Download CSV", data=csv_d,
-                            file_name=f"SKAMCSHRC_{d_from}_{d_to}.csv",
+                            file_name=f"SKAMCRC_H_{d_from}_{d_to}.csv",
                             mime="text/csv", use_container_width=True)
