@@ -1292,8 +1292,8 @@ def render_consultation():
         st.markdown("---")
         # Search by ID or mobile
         lc1, lc2 = st.columns(2)
-        with lc1: lid  = st.text_input("Load by Patient ID",     key="lid_t2")
-        with lc2: lmob = st.text_input("Load by Mobile Number",   key="lmob_t2")
+        with lc1: lid  = st.text_input("Load by Patient ID",     key="c_lid_t2")
+        with lc2: lmob = st.text_input("Load by Mobile Number",   key="c_lmob_t2")
         if lid or lmob:
             found = find_patient(my_recs,
                                   pid=lid if lid else None,
@@ -1337,7 +1337,7 @@ def render_consultation():
         if rec.get("ACD_Code_1"):
             st.markdown(f'**Provisional Dx:** <span class="code-tag">{rec["ACD_Code_1"]}</span> '
                         f'{rec.get("ACD_Meaning_1","")}', unsafe_allow_html=True)
-        if st.button("Close / Load different patient", key="close_rec"):
+        if st.button("Close / Load different patient", key="c_close_rec"):
             st.session_state.active_rec = {}
             st.rerun()
 
@@ -1348,7 +1348,7 @@ def render_consultation():
         tr_def = rec.get("Treatment_Response", TREATMENT_RESPONSE[0])
         tr_idx = TREATMENT_RESPONSE.index(tr_def) if tr_def in TREATMENT_RESPONSE else 0
         treatment_response = st.selectbox("How did patient respond?",
-                                           TREATMENT_RESPONSE, index=tr_idx, key="tr")
+                                           TREATMENT_RESPONSE, index=tr_idx, key="c_tr")
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         treatment_response = "Not yet assessed"
@@ -1358,21 +1358,21 @@ def render_consultation():
     sec("1  Vitals")
     v1,v2,v3 = st.columns(3)
     with v1:
-        height = st.number_input("Height (cm)",  50.0, 250.0, 160.0, step=1.0, key="ht")
-        weight = st.number_input("Weight (kg)",  1.0,  300.0, 50.0,  step=0.5, key="wt")
+        height = st.number_input("Height (cm)",  50.0, 250.0, 160.0, step=1.0, key="c_ht")
+        weight = st.number_input("Weight (kg)",  1.0,  300.0, 50.0,  step=0.5, key="c_wt")
         bmi_v  = weight / ((height/100)**2) if height > 0 else 0
         bmi_c  = bmi_cat(bmi_v)
         st.markdown(f'<div class="bmi">BMI: {bmi_v:.1f} — {bmi_c}</div>', unsafe_allow_html=True)
     with v2:
-        bp_s = st.number_input("BP Systolic (mmHg)",  60,  250, 120, step=1, key="bps")
-        bp_d = st.number_input("BP Diastolic (mmHg)", 40,  160,  80, step=1, key="bpd")
+        bp_s = st.number_input("BP Systolic (mmHg)",  60,  250, 120, step=1, key="c_bps")
+        bp_d = st.number_input("BP Diastolic (mmHg)", 40,  160,  80, step=1, key="c_bpd")
     with v3:
-        pulse = st.number_input("Pulse (bpm)",       30, 220, 76,   step=1,   key="pulse")
-        temp  = st.number_input("Temperature (F)",   90.0, 108.0, 98.6, step=0.1, key="temp")
+        pulse = st.number_input("Pulse (bpm)",       30, 220, 76,   step=1,   key="c_pulse")
+        temp  = st.number_input("Temperature (F)",   90.0, 108.0, 98.6, step=0.1, key="c_temp")
     vv4,vv5 = st.columns(2)
-    with vv4: spo2 = st.number_input("SpO2 (%)",          50, 100, 98, step=1, key="spo2")
-    with vv5: rr   = st.number_input("Resp. Rate (/min)",  5,  60, 16, step=1, key="rr")
-    other_inv = st.text_area("Lab Reports / Other Investigations", key="other_inv", height=50,
+    with vv4: spo2 = st.number_input("SpO2 (%)",          50, 100, 98, step=1, key="c_spo2")
+    with vv5: rr   = st.number_input("Resp. Rate (/min)",  5,  60, 16, step=1, key="c_rr")
+    other_inv = st.text_area("Lab Reports / Other Investigations", key="c_other_inv", height=50,
                               placeholder="e.g. Hb 11.2 g/dL; FBS 126 mg/dL; X-ray: Disc prolapse L4-L5")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1380,13 +1380,13 @@ def render_consultation():
     st.markdown('<div class="card">', unsafe_allow_html=True)
     sec("2  Ashtavidha Pariksha")
     a1,a2,a3,a4 = st.columns(4)
-    with a1: nadi=sel_other("Nadi",   NADI_OPT,   "nadi");  jihva=sel_other("Jihva",  JIHVA_OPT, "jihva")
-    with a2: agni=sel_other("Agni",   AGNI_OPT,   "agni");  mala =sel_other("Mala",   MALA_OPT,  "mala")
-    with a3: mutra=sel_other("Mutra", MUTRA_OPT,  "mutra"); sleep=sel_other("Nidra",  SLEEP_OPT, "sleep")
-    with a4: shabda=sel_other("Shabda",SHABDA_OPT,"shabda");sparsha=sel_other("Sparsha",SPARSHA_OPT,"sparsha")
+    with a1: nadi=sel_other("Nadi",   NADI_OPT,   "c_nadi");  jihva=sel_other("Jihva",  JIHVA_OPT, "c_jihva")
+    with a2: agni=sel_other("Agni",   AGNI_OPT,   "c_agni");  mala =sel_other("Mala",   MALA_OPT,  "c_mala")
+    with a3: mutra=sel_other("Mutra", MUTRA_OPT,  "c_mutra"); sleep=sel_other("Nidra",  SLEEP_OPT, "c_sleep")
+    with a4: shabda=sel_other("Shabda",SHABDA_OPT,"c_shabda");sparsha=sel_other("Sparsha",SPARSHA_OPT,"c_sparsha")
     aa5,aa6 = st.columns(2)
-    with aa5: drik  =sel_other("Drik",  DRIK_OPT,  "drik")
-    with aa6: akriti=sel_other("Akriti",AKRITI_OPT,"akriti")
+    with aa5: drik  =sel_other("Drik",  DRIK_OPT,  "c_drik")
+    with aa6: akriti=sel_other("Akriti",AKRITI_OPT,"c_akriti")
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Dashavidha Pariksha
@@ -1394,19 +1394,19 @@ def render_consultation():
     sec("3  Dashavidha Atura Pariksha")
     d1,d2,d3 = st.columns(3)
     with d1:
-        dosha  = sel_other("Dosha (Dominant)", DOSHA_OPT, "dosha")
-        dushya = st.multiselect("Dushya (Dhatu / Mala)", DUSHYA_OPT, key="dushya")
-        bala   = sel_other("Bala (Strength)",  BALA_OPT,  "bala")
+        dosha  = sel_other("Dosha (Dominant)", DOSHA_OPT, "c_dosha")
+        dushya = st.multiselect("Dushya (Dhatu / Mala)", DUSHYA_OPT, key="c_dushya")
+        bala   = sel_other("Bala (Strength)",  BALA_OPT,  "c_bala")
     with d2:
-        kala   = st.selectbox("Kala (Season)", KALA_OPT,   key="kala")
-        satva  = sel_other("Satva",            SATVA_OPT,  "satva")
-        satmya = sel_other("Satmya",           SATMYA_OPT, "satmya")
+        kala   = st.selectbox("Kala (Season)", KALA_OPT,   key="c_kala")
+        satva  = sel_other("Satva",            SATVA_OPT,  "c_satva")
+        satmya = sel_other("Satmya",           SATMYA_OPT, "c_satmya")
     with d3:
-        vyasana = sel_other("Vyasana (Habits)", VYASANA_OPT, "vyasana")
+        vyasana = sel_other("Vyasana (Habits)", VYASANA_OPT, "c_vyasana")
         cprak   = st.selectbox("Prakriti (confirm)", PRAKRITI_OPT,
                                 index=PRAKRITI_OPT.index(rec.get("Prakriti", PRAKRITI_OPT[0]))
                                       if rec.get("Prakriti") in PRAKRITI_OPT else 0,
-                                key="cprak")
+                                key="c_cprak")
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Final Diagnosis
@@ -1416,8 +1416,8 @@ def render_consultation():
     if pcode:
         st.markdown(f"Provisional: <span class='code-tag'>{pcode}</span> — {pmean}",
                     unsafe_allow_html=True)
-    _, fd_code, fd_mean = acd_widget("fds","fdsel","Search Final Diagnosis")
-    if st.checkbox("Same as Provisional", key="same_prov") and pcode:
+    _, fd_code, fd_mean = acd_widget("c_fds","c_fdsel","Search Final Diagnosis")
+    if st.checkbox("Same as Provisional", key="c_same_prov") and pcode:
         fd_code = pcode; fd_mean = pmean
         st.markdown(f'<span class="code-tag">{fd_code}</span>  {fd_mean}',
                     unsafe_allow_html=True)
@@ -1441,7 +1441,7 @@ def render_consultation():
             opts = [f"{nm} — {desc} [{cd}]" for cd,nm,desc in PK_TX[cat]]
             cur  = [c for c in st.session_state.get(f"tx_{cat}",[]) if c in opts]
             chosen = st.multiselect(f"Select {cat} procedures", opts, default=cur,
-                                     key=f"tx_ms_{cat}")
+                                     key=f"c_tx_ms_{cat}")
             st.session_state[f"tx_{cat}"] = chosen
             if chosen:
                 st.markdown("**Add comments for each procedure:**")
@@ -1452,13 +1452,13 @@ def render_consultation():
                                 f'border-radius:0 7px 7px 0;padding:6px 12px;margin:4px 0">',
                                 unsafe_allow_html=True)
                     cmt = st.text_input(f"{name}  [{code}]", value=ex.get(code,""),
-                                         key=f"tc_{cat}_{code}",
+                                         key=f"c_tc_{cat}_{code}",
                                          placeholder="e.g. with Dhanwantaram taila 45 min daily x 7 days")
                     st.markdown('</div>', unsafe_allow_html=True)
                     nc[code] = cmt
                 st.session_state[f"tc_{cat}"] = nc
 
-    tx_custom = st.text_input("Additional treatment / Yoga / Pathya", key="tx_custom",
+    tx_custom = st.text_input("Additional treatment / Yoga / Pathya", key="c_tx_custom",
                                placeholder="e.g. Pathya Ahara, Yoga Nidra")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1467,34 +1467,34 @@ def render_consultation():
     sec("6  Medicines (Shamana Aushadhi)")
     ac, rc, _ = st.columns([1,1,5])
     with ac:
-        if st.button("+ Add Medicine", key="add_med"):
-            st.session_state.med_count += 1; st.rerun()
+        if st.button("+ Add Medicine", key="c_add_med"):
+            st.session_state.c_med_count = st.session_state.get("c_med_count",1) + 1; st.rerun()
     with rc:
-        if st.session_state.med_count > 1 and st.button("- Remove Last", key="rem_med"):
-            st.session_state.med_count -= 1; st.rerun()
+        if st.session_state.med_count > 1 and st.button("- Remove Last", key="c_rem_med"):
+            st.session_state.c_med_count = max(1, st.session_state.get("c_med_count",1) - 1); st.rerun()
 
     medicines = []
-    for i in range(1, st.session_state.med_count+1):
+    for i in range(1, st.session_state.get("c_med_count",1)+1):
         st.markdown(f'<div class="med-box"><b>Medicine {i}</b>', unsafe_allow_html=True)
         r1a,r1b,r1c = st.columns([3,2,2])
-        with r1a: mname  = st.text_input(f"Drug Name {i}", key=f"mn_{i}",
+        with r1a: mname  = st.text_input(f"Drug Name {i}", key=f"c_mn_{i}",
                                           placeholder="e.g. Triphala Churna, Ashwagandha Vati")
-        with r1b: mform  = csel(f"Dosage Form {i}", DOSAGE_FORMS, f"mf_{i}")
-        with r1c: mroute = csel(f"Route {i}",        ROUTE_OPTIONS, f"mr_{i}", idx=0)
+        with r1b: mform  = csel(f"Dosage Form {i}", DOSAGE_FORMS, f"c_mf_{i}")
+        with r1c: mroute = csel(f"Route {i}",        ROUTE_OPTIONS, f"c_mr_{i}", idx=0)
 
         r2a,r2b,r2c,r2d,r2e = st.columns([2,2,2,1,1])
         with r2a: mdose  = csel(f"Dose {i}",    DOSE_OPTIONS,    f"md_{i}",  ph="e.g. 5g BD")
-        with r2b: mtiming = st.selectbox(f"Timing {i}", TIMING_OPTIONS, key=f"mt_{i}")
-        with r2c: manupana = csel(f"Anupana {i}", ANUPANA_OPTIONS, f"ma_{i}", idx=0)
-        with r2d: mdur_val = st.number_input(f"Duration {i}", 1, 999, 15, step=1, key=f"mdv_{i}")
-        with r2e: mdur_unit= st.selectbox(f"Unit {i}", DURATION_UNIT, key=f"mdu_{i}")
+        with r2b: mtiming = st.selectbox(f"Timing {i}", TIMING_OPTIONS, key=f"c_mt_{i}")
+        with r2c: manupana = csel(f"Anupana {i}", ANUPANA_OPTIONS, f"c_ma_{i}", idx=0)
+        with r2d: mdur_val = st.number_input(f"Duration {i}", 1, 999, 15, step=1, key=f"c_mdv_{i}")
+        with r2e: mdur_unit= st.selectbox(f"Unit {i}", DURATION_UNIT, key=f"c_mdu_{i}")
 
         preview = {"form":mform,"dose":mdose,"timing":mtiming,"anupana":manupana,
                    "dur_val":mdur_val,"dur_unit":mdur_unit,"notes":""}
         if mdose and mdose != "— Custom —":
             st.caption(f"Instruction preview: {med_instruction(preview)}")
 
-        mnotes = st.text_input(f"Notes for Medicine {i} (optional)", key=f"mno_{i}",
+        mnotes = st.text_input(f"Notes for Medicine {i} (optional)", key=f"c_mno_{i}",
                                 placeholder="e.g. take warm, avoid in pregnancy")
         st.markdown('</div>', unsafe_allow_html=True)
         if mname.strip():
@@ -1509,18 +1509,18 @@ def render_consultation():
     sec("7  Lab Tests & Follow-up Date")
     l1, l2 = st.columns([3,1])
     with l1:
-        lab_tests = st.text_area("Tests to be done before next visit", key="lab_tests",
+        lab_tests = st.text_area("Tests to be done before next visit", key="c_lab_tests",
                                   height=50, placeholder="e.g. CBC, FBS, HbA1c, Lipid profile")
     with l2:
         followup_date = st.date_input("Next Visit Date",
-                                       value=date.today()+timedelta(days=15), key="fu_date")
+                                       value=date.today()+timedelta(days=15), key="c_fu_date")
         st.caption("Default: 15 days")
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Instructions
     st.markdown('<div class="card">', unsafe_allow_html=True)
     sec("8  Instructions for Patient (optional)")
-    instructions = st.text_area("Dietary advice, lifestyle, precautions", key="instruct",
+    instructions = st.text_area("Dietary advice, lifestyle, precautions", key="c_instruct",
                                   height=70,
                                   placeholder="e.g. Avoid cold and oily food\nDrink warm water throughout the day\nRest adequately")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -1528,10 +1528,10 @@ def render_consultation():
     # Notes
     st.markdown('<div class="card">', unsafe_allow_html=True)
     sec("9  Physician Notes")
-    phys_notes = st.text_area("Clinical notes (for records)", key="phys_notes", height=50,
+    phys_notes = st.text_area("Clinical notes (for records)", key="c_phys_notes", height=50,
                                placeholder="Referrals, special observations, clinical notes...")
     followup_notes = st.text_area("Follow-up reminder (visible at patient's next visit)",
-                                   key="fu_notes", height=55,
+                                   key="c_fu_notes", height=55,
                                    placeholder="e.g. Check BP response\nReview HbA1c\nAssess Sneha Pana tolerance before Virechana")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1540,30 +1540,30 @@ def render_consultation():
     sec("10  Save & Print Prescription")
 
     def build_full():
-        tx_pur = st.session_state.get("tx_Purvakarma",[])
-        tx_pra = st.session_state.get("tx_Pradhana Karma",[])
-        tx_pas = st.session_state.get("tx_Pashchata Karma",[])
-        tc_pur = st.session_state.get("tc_Purvakarma",{})
-        tc_pra = st.session_state.get("tc_Pradhana Karma",{})
-        tc_pas = st.session_state.get("tc_Pashchata Karma",{})
+        tx_pur = st.session_state.get("c_tx_Purvakarma",[])
+        tx_pra = st.session_state.get("c_tx_Pradhana Karma",[])
+        tx_pas = st.session_state.get("c_tx_Pashchata Karma",[])
+        tc_pur = st.session_state.get("c_tc_Purvakarma",{})
+        tc_pra = st.session_state.get("c_tc_Pradhana Karma",{})
+        tc_pas = st.session_state.get("c_tc_Pashchata Karma",{})
         r = dict(rec)
         r["tx_Purvakarma"]    = tx_pur; r["tx_Pradhana Karma"] = tx_pra; r["tx_Pashchata Karma"] = tx_pas
         r["tc_Purvakarma"]    = tc_pur; r["tc_Pradhana Karma"] = tc_pra; r["tc_Pashchata Karma"] = tc_pas
-        r["TX_Custom"]        = st.session_state.get("tx_custom","")
+        r["TX_Custom"]        = st.session_state.get("c_tx_custom","")
         r["Medicines"]        = medicines
-        r["Lab_Tests"]        = st.session_state.get("lab_tests","")
-        r["Instructions"]     = st.session_state.get("instruct","")
-        r["Followup_Date"]    = str(st.session_state.get("fu_date",""))
-        r["Physician_Notes"]  = st.session_state.get("phys_notes","")
-        r["Followup_Notes"]   = st.session_state.get("fu_notes","")
-        r["Height_cm"]  = st.session_state.get("ht",0)
-        r["Weight_kg"]  = st.session_state.get("wt",0)
+        r["Lab_Tests"]        = st.session_state.get("c_lab_tests","")
+        r["Instructions"]     = st.session_state.get("c_instruct","")
+        r["Followup_Date"]    = str(st.session_state.get("c_fu_date",""))
+        r["Physician_Notes"]  = st.session_state.get("c_phys_notes","")
+        r["Followup_Notes"]   = st.session_state.get("c_fu_notes","")
+        r["Height_cm"]  = st.session_state.get("c_ht",0)
+        r["Weight_kg"]  = st.session_state.get("c_wt",0)
         r["BMI"]        = round(bmi_v,1); r["BMI_Category"] = bmi_c
         r["BP"]         = f"{st.session_state.get('bps',120)}/{st.session_state.get('bpd',80)}"
-        r["Pulse_bpm"]  = st.session_state.get("pulse",76)
-        r["Temp_F"]     = st.session_state.get("temp",98.6)
-        r["SpO2_pct"]   = st.session_state.get("spo2",98)
-        sp = st.session_state.get("same_prov", False)
+        r["Pulse_bpm"]  = st.session_state.get("c_pulse",76)
+        r["Temp_F"]     = st.session_state.get("c_temp",98.6)
+        r["SpO2_pct"]   = st.session_state.get("c_spo2",98)
+        sp = st.session_state.get("c_same_prov", False)
         if sp:      r["Final_ACD_Code"]=pcode; r["Final_ACD_Meaning"]=pmean
         elif fd_code: r["Final_ACD_Code"]=fd_code; r["Final_ACD_Meaning"]=fd_mean
         return r
@@ -1573,25 +1573,25 @@ def render_consultation():
 
     s1, s2, s3, s4 = st.columns(4)
     with s1:
-        if st.button("Save Consultation", type="primary", use_container_width=True, key="save_cons"):
+        if st.button("Save Consultation", type="primary", use_container_width=True, key="c_save_cons"):
             r = build_full()
-            tx_pur = st.session_state.get("tx_Purvakarma",[])
-            tx_pra = st.session_state.get("tx_Pradhana Karma",[])
-            tx_pas = st.session_state.get("tx_Pashchata Karma",[])
-            tc_pur = st.session_state.get("tc_Purvakarma",{})
-            tc_pra = st.session_state.get("tc_Pradhana Karma",{})
-            tc_pas = st.session_state.get("tc_Pashchata Karma",{})
+            tx_pur = st.session_state.get("c_tx_Purvakarma",[])
+            tx_pra = st.session_state.get("c_tx_Pradhana Karma",[])
+            tx_pas = st.session_state.get("c_tx_Pashchata Karma",[])
+            tc_pur = st.session_state.get("c_tc_Purvakarma",{})
+            tc_pra = st.session_state.get("c_tc_Pradhana Karma",{})
+            tc_pas = st.session_state.get("c_tc_Pashchata Karma",{})
             med_sum = "; ".join([f"{m['name']} {m['form']} {m['dose']} {m['timing']} "
                                   f"x{m['dur_val']} {m['dur_unit']} | Anupana:{m['anupana']}"
                                   for m in medicines])
-            sp = st.session_state.get("same_prov",False)
+            sp = st.session_state.get("c_same_prov",False)
             upd = {
                 "Status":"Completed","Treatment_Response":treatment_response,
                 "Height_cm":r["Height_cm"],"Weight_kg":r["Weight_kg"],
                 "BMI":r["BMI"],"BMI_Category":r["BMI_Category"],
                 "BP":r["BP"],"Pulse_bpm":r["Pulse_bpm"],"Temp_F":r["Temp_F"],
-                "SpO2_pct":r["SpO2_pct"],"RR_per_min":st.session_state.get("rr",16),
-                "Other_Investigation":st.session_state.get("other_inv",""),
+                "SpO2_pct":r["SpO2_pct"],"RR_per_min":st.session_state.get("c_rr",16),
+                "Other_Investigation":st.session_state.get("c_other_inv",""),
                 "Nadi":nadi,"Jihva":jihva,"Agni":agni,"Mala":mala,
                 "Mutra":mutra,"Sleep":sleep,"Shabda":shabda,"Sparsha":sparsha,
                 "Drik":drik,"Akriti":akriti,"Dosha":dosha,
@@ -1606,13 +1606,13 @@ def render_consultation():
                 "TX_Comments_Purvakarma":cmt_flat(tx_pur,tc_pur),
                 "TX_Comments_Pradhana":  cmt_flat(tx_pra,tc_pra),
                 "TX_Comments_Pashchata": cmt_flat(tx_pas,tc_pas),
-                "TX_Custom":st.session_state.get("tx_custom",""),
+                "TX_Custom":st.session_state.get("c_tx_custom",""),
                 "Medicines_Summary":med_sum,
-                "Lab_Tests":st.session_state.get("lab_tests",""),
-                "Instructions":st.session_state.get("instruct",""),
-                "Followup_Date":str(st.session_state.get("fu_date","")),
-                "Physician_Notes":st.session_state.get("phys_notes",""),
-                "Followup_Notes":st.session_state.get("fu_notes",""),
+                "Lab_Tests":st.session_state.get("c_lab_tests",""),
+                "Instructions":st.session_state.get("c_instruct",""),
+                "Followup_Date":str(st.session_state.get("c_fu_date","")),
+                "Physician_Notes":st.session_state.get("c_phys_notes",""),
+                "Followup_Notes":st.session_state.get("c_fu_notes",""),
             }
             rec.update(upd)
             for i, r2 in enumerate(st.session_state.records):
@@ -1632,7 +1632,7 @@ def render_consultation():
         pdf_rx = make_pdf(r_rx, mode="rx")
         st.download_button("Prescription", data=pdf_rx,
                             file_name=f"Rx_{rec.get('Patient_ID','PT')}_{date.today()}.pdf",
-                            mime="application/pdf", key="dl_rx",
+                            mime="application/pdf", key="c_dl_rx",
                             use_container_width=True)
     with s3:
         has_pk = any(st.session_state.get(f"tx_{c}",[])
@@ -1642,7 +1642,7 @@ def render_consultation():
             pdf_pk = make_pdf(r_pk, mode="pk")
             st.download_button("PK Advice", data=pdf_pk,
                                 file_name=f"PK_{rec.get('Patient_ID','PT')}_{date.today()}.pdf",
-                                mime="application/pdf", key="dl_pk",
+                                mime="application/pdf", key="c_dl_pk",
                                 use_container_width=True)
         else:
             st.button("PK Advice", disabled=True, use_container_width=True,
@@ -1652,7 +1652,7 @@ def render_consultation():
         pdf_both = make_pdf(r_both, mode="both")
         st.download_button("Full Document", data=pdf_both,
                             file_name=f"Full_{rec.get('Patient_ID','PT')}_{date.today()}.pdf",
-                            mime="application/pdf", key="dl_both",
+                            mime="application/pdf", key="c_dl_both",
                             use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
